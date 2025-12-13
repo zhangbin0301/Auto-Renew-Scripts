@@ -18,7 +18,7 @@ jobs:
       - name: Checkout private repo
         uses: actions/checkout@v4
         with:
-          repository: kamanmuez/Zampto-Auto-Renew  # 私库的仓库位置
+          repository: zhangbin0301/Faiz-Zampto-Auto-Renew   # 私库的仓库位置
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
 
       - name: Setup Python
