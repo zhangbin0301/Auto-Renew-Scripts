@@ -1,0 +1,90 @@
+name: Castle-Host Auto Renew (Beautified)
+
+on:
+  schedule:
+    # 每天北京时间 09:00 和 21:00 执行 (UTC 01:00, 13:00)
+    - cron: '0 1,13 * * *'
+  workflow_dispatch:
+
+jobs:
+  renew-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 执行续期请求
+        run: |
+          # ================= 配置区域 =================
+          SERVER_ID="117048"
+          URL="https://cp.castle-host.com/servers/pay/buy_months/${SERVER_ID}"
+          REFERER="https://cp.castle-host.com/servers/pay/index/${SERVER_ID}"
+          UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+          
+          # 填入你的最新凭证
+          CSRF_TOKEN="xxxxxxxxxxxxxxxx4429cae1ff3c039cdf9d9e14ede5d73a3"
+          COOKIE='PHPSESSID=0oulmxxxxxxxxxxxxxb6mha1; twk_idm_key=IPE7ilwXw04xxxxxNcpe; uid=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxQyZDM3UUZWV0JwREpITHhvTnE1VlFFSTBwcXhWTFVDREI4Q3Y5R0dqRkNjOExyd0M2VWVjazRLY3pKOG9qM3RSZjhwUFNjcHo4UThq%7Cfa9a03ebf3e0c7fbd53becd83db53408b3ed1f52332af0a923d80834d5972960; TawkConnectionTime=0'
+
+          # ================= 开始执行 =================
+          echo -e "\033[36m🚀 [$(date "+%Y-%m-%d %H:%M:%S")] 开始执行续期任务 (Server ID: $SERVER_ID)...\033[0m"
+
+          # 发送请求
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$URL" \
+            -H "Cookie: $COOKIE" \
+            -H "x-csrf-token: $CSRF_TOKEN" \
+            -H "x-requested-with: XMLHttpRequest" \
+            -H "referer: $REFERER" \
+            -H "user-agent: $UA" \
+            -H "origin: https://cp.castle-host.com" \
+            -H "content-type: application/x-www-form-urlencoded" \
+            -H "accept: application/json, text/plain, */*" \
+            --data-raw "")
+
+          # 分离 HTTP 状态码和 Body
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "---------------------------------------------------"
+          echo -e "📡 \033[33mHTTP 状态码:\033[0m $HTTP_CODE"
+          
+          # ================= 结果美化解析 =================
+          
+          # 使用 jq 尝试解析 JSON (如果不是 JSON 则直接输出)
+          if echo "$BODY" | jq -e . >/dev/null 2>&1; then
+            echo -e "📝 \033[33m服务器响应 (JSON解析):\033[0m"
+            # jq . 负责格式化和高亮，jq -r .error 负责提取纯文本错误信息(自动解码Unicode)
+            echo "$BODY" | jq .
+            
+            STATUS=$(echo "$BODY" | jq -r '.status')
+            ERROR_MSG=$(echo "$BODY" | jq -r '.error // empty')
+          else
+            echo -e "📝 \033[33m服务器响应 (原始内容):\033[0m"
+            echo "$BODY"
+            STATUS="unknown"
+          fi
+          
+          echo "---------------------------------------------------"
+
+          # ================= 智能状态判断 =================
+          if [[ "$STATUS" == "success" ]]; then
+             echo -e "\033[32m✅ [成功] 续期操作已完成！\033[0m"
+             
+          elif [[ "$BODY" == *"Ошибка валидации"* ]]; then
+             echo -e "\033[31m❌ [致命错误] 身份验证失败！\033[0m"
+             echo "原因: Cookie 或 Token 已过期，请重新抓包。"
+             exit 1
+             
+          elif [[ "$ERROR_MSG" != "" ]]; then
+             # 翻译常见的俄语提示
+             if [[ "$ERROR_MSG" == *"24 часа"* ]]; then
+                TRANS_MSG="冷却中：距离上次续期未满 24 小时"
+             elif [[ "$ERROR_MSG" == *"ранее чем"* ]]; then
+                TRANS_MSG="太早了：还没到允许续期的时间"
+             else
+                TRANS_MSG="$ERROR_MSG"
+             fi
+             
+             echo -e "\033[34m⚠️  [提示] 请求已发送，但未续期。\033[0m"
+             echo -e "原消息: $ERROR_MSG"
+             echo -e "解析: \033[1m$TRANS_MSG\033[0m"
+             
+          else
+             echo -e "\033[35mℹ️ [未知] 无法识别的响应格式，请人工检查。\033[0m"
+          fi
