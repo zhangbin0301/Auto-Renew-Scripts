@@ -1,4 +1,4 @@
-name: Castle-Host Auto Renew (Beautified)
+name: cp.castle-host Auto Renew (Beautified)
 
 on:
   schedule:
