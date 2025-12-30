@@ -19,7 +19,7 @@ jobs:
           UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
           
           # 填入你的最新凭证
-          CSRF_TOKEN="xxxxxxxxxxxxxxxx4429cae1ff3c039cdf9d9e14ede5d73a3"
+          CSRF_TOKEN="a6f07b69080c8592c933dab09397bc333a464e2984422c9aff2d993bc5e03f3a"
           COOKIE='PHPSESSID=t4c5md76h7bm91nvqruicqn5ua; twk_idm_key=IPE7ilwXw04xxxxxNcpe; uid=NWI4NTZzTnN6VnkwMHA0VFFUOUZJZ3R3VStyL1VEK0w1NTZPdXdpUmVFaytIc29kZTVUdHFraGY4UUVFNGsyZmxjUWZjOEl5dFVUbWdZcWdTcjF4V2ptdmkvN2tQTWl4bmptR2J3a2UxK1NlUnZKclJXT1hoanozUzdYTklCa3RoY0cyc1JHYWlwK3VqTzhwaHloVXZiL09qZ29pd2lkY3BwbzF1cEJveEsyT1RzNzdSU0hPcHpNdE9NS2doZnlr|ec1c4b3f8240d7881957ba530df10937b12314a708a56ffd4ae1e7086bbac29b; TawkConnectionTime=0'
 
           # ================= 开始执行 =================
