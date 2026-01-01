@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: zhangbin0301/Faiz-Zampto-Auto-Renew   # 私库的仓库位置
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}  # github GH_PAT  ghp_3pqz7fhfzDxxxxxxx
 
       - name: Setup Python
         uses: actions/setup-python@v5
