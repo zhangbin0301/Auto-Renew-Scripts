@@ -19,8 +19,8 @@ jobs:
           UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
           
           # 填入你的最新凭证
-          CSRF_TOKEN="a6f07b69080c8592c933dab09397bc333a464e2984422c9aff2d993bc5e03f3a"
-          COOKIE='PHPSESSID=t4c5md76h7bm91nvqruicqn5ua; twk_idm_key=IPE7ilwXw04xxxxxNcpe; uid=NWI4NTZzTnN6VnkwMHA0VFFUOUZJZ3R3VStyL1VEK0w1NTZPdXdpUmVFaytIc29kZTVUdHFraGY4UUVFNGsyZmxjUWZjOEl5dFVUbWdZcWdTcjF4V2ptdmkvN2tQTWl4bmptR2J3a2UxK1NlUnZKclJXT1hoanozUzdYTklCa3RoY0cyc1JHYWlwK3VqTzhwaHloVXZiL09qZ29pd2lkY3BwbzF1cEJveEsyT1RzNzdSU0hPcHpNdE9NS2doZnlr|ec1c4b3f8240d7881957ba530df10937b12314a708a56ffd4ae1e7086bbac29b; TawkConnectionTime=0'
+          CSRF_TOKEN="b289c4a0fab181f8f4064107679fb71b42947f00ee30a35b56d28f42a5f70d2c"
+          COOKIE='PHPSESSID=sll5u69cmjtp7nbmkbiriatajl; twk_idm_key=IPE7ilwXw04xxxxxNcpe; uid=RnV0NUd2c3M1R0FnRW1NTVR1a0dPSUJVMld1Z2FzUndDNyt2MVpHdzJ2bGZncytnS1puRnlRU3R6UnZOb0JlQmlhekpMYWdZK0ViZWFpQmNYVnp4cWo3T2w5MjdMUU4wYVRWQkp0aUFpK3EyaWp1SU5jbzBjRHd4Q2NXOWl5MlkyOUw3dHF5N3ExajhuelhhTElGT2YvRmU5MEY0NC9haUFkNjFFeXFqRW5NY1NXb0tyMHRoZklOS0Z6R0orQUxt|8b52c0b81eaae02876513ab009f8226d980a98fbbe24a20f7691604802111fa4; TawkConnectionTime=0'
 
           # ================= 开始执行 =================
           echo -e "\033[36m🚀 [$(date "+%Y-%m-%d %H:%M:%S")] 开始执行续期任务 (Server ID: $SERVER_ID)...\033[0m"
