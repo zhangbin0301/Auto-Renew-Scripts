@@ -1,4 +1,4 @@
-name: Faiz-Zampto-Auto-Renew
+name: Faiz-Zampto-AutoRenew
 
 on:
   schedule:
