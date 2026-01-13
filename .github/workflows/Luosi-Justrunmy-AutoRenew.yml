@@ -1,4 +1,4 @@
-name: Luosi-justrunmy.app-Renew-main-test
+name: Luosi-Justrunmy-AutoRenew
 
 on:
   workflow_dispatch:
