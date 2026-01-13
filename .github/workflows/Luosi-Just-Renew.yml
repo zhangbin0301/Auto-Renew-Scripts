@@ -1,0 +1,60 @@
+name: Luosi-Just-Renew-main-test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+# ⚠️ 必须添加权限配置，允许 Action 修改仓库文件
+permissions:
+  contents: write
+
+jobs:
+  run_renewal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+          repository: zhangbin0301/Luosi-Just-Renew-main   # 私库的仓库位置
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}  # github GH_PAT  ghp_3pqz7fhfzDxxxxxxx
+          fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install selenium selenium-wire blinker==1.4
+
+    - name: Run Script
+      run: python main.py
+
+    # 👇 新增步骤：将更新后的 cookie.txt 提交回仓库
+    - name: Commit and Push Cookie Update
+      if: success() # 只有脚本运行成功才提交
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        
+        # 检查 cookie.txt 是否有变化
+        if [[ -n $(git status -s cookie.txt) ]]; then
+          echo "检测到 Cookie 更新，正在提交..."
+          git add cookie.txt
+          git commit -m "Auto-update auth cookie [skip ci]"
+          git push
+        else
+          echo "Cookie 无变化，跳过提交。"
+        fi
+
+    - name: Upload Error Screenshot
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-screenshot
+        path: error.png
