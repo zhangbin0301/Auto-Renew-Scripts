@@ -1,4 +1,4 @@
-name: Weirdhost Auto Renew
+name: Fazi-Weirdhost-AutoRenew
 
 on:
   schedule:
