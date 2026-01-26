@@ -1,0 +1,44 @@
+name: Weirdhost Auto Renew
+
+on:
+  schedule:
+    # 每天 UTC 时间 4:00 运行（北京时间 12:00）
+    - cron: '0 4 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/Weirdhost-Auto-Renew
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: scripts
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        working-directory: scripts
+        run: pip install -r requirements.txt -q > /dev/null 2>&1
+      
+      - name: Run renew script
+        working-directory: scripts
+        env:
+          HEADLESS: 'true'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+      
+      - name: Upload response JSON files
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: response-json
+          path: scripts/response_*.json
+          retention-days: 7
