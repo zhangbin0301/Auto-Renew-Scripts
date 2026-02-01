@@ -5,9 +5,8 @@ on:
   schedule:
     - cron: '0 2 * * *'
 
-# ⚠️ 必须添加权限配置，允许 Action 修改仓库文件
 permissions:
-  contents: write
+  contents: write   # ⚠️ 必须添加权限配置，允许 Action 修改仓库文件
 
 jobs:
   run_renewal:
@@ -38,8 +37,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-
-    # 👇 新增步骤：将更新后的 cookie.txt 提交回仓库
+    # 👇 将更新后的 cookie.txt 提交回仓库
     - name: Commit and Push Cookie Update
       if: success() # 只有脚本运行成功才提交
       run: |
@@ -62,3 +60,12 @@ jobs:
       with:
         name: error-screenshot
         path: error.png
+
+    - name: Clean up old workflow runs
+      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      with:
+        repository: ${{ github.repository }}
+        older-than-seconds: 86400  # 删除24小时前的记录
+        
