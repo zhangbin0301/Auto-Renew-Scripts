@@ -61,10 +61,7 @@ jobs:
         path: error.png
 
     - name: Clean up old workflow runs
-      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+      run: |
+        gh run delete --all --repo ${{ github.repository }} --keep 3
       env:
-        GITHUB_TOKEN: ${{ github.token }}
-      with:
-        repository: ${{ github.repository }}
-        older-than-seconds: 86400  # 删除24小时前的记录
-        
+        GH_TOKEN: ${{ github.token }}
