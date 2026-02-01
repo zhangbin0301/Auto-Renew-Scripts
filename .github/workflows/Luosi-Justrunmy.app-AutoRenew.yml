@@ -18,7 +18,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-          repository: ${{ github.repository_owner }}/Luosi-Justrunmy.app-AutoRenew   # 私库的仓库位置
+          repository: zhangbin0301/Luosi-Justrunmy.app-AutoRenew   # 私库的仓库位置
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}  # github GH_PAT  ghp_3pqz7fhfzDxxxxxxx
           fetch-depth: 0
 
