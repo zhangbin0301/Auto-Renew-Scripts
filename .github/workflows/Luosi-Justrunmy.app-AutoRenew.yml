@@ -6,8 +6,8 @@ on:
     - cron: '0 2 * * *'
 
 permissions:
-  contents: write   # ⚠️ 必须添加权限配置，允许 Action 修改仓库文件
-  actions: write   # 允许删除工作流运行记录
+  contents: write  # 允许修改 cookie.txt
+  actions: write   # 允许清理 workflow 记录
 
 jobs:
   run_renewal:
@@ -18,14 +18,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-          repository: zhangbin0301/Luosi-Justrunmy.app-AutoRenew   # 私库的仓库位置
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}  # github GH_PAT  ghp_3pqz7fhfzDxxxxxxx
+          # 注意：如果是本仓库，可以直接去掉 repository 那行，更简洁
+          repository: zhangbin0301/Luosi-Justrunmy.app-AutoRenew
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'   
+        python-version: '3.10'
 
     - name: Install dependencies
       run: pip install -r requirements.txt -q > /dev/null 2>&1
@@ -36,14 +37,12 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    # 👇 将更新后的 cookie.txt 提交回仓库
     - name: Commit and Push Cookie Update
-      if: success() # 只有脚本运行成功才提交
+      if: success()
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
         
-        # 检查 cookie.txt 是否有变化
         if [[ -n $(git status -s cookie.txt) ]]; then
           echo "检测到 Cookie 更新，正在提交..."
           git add cookie.txt
@@ -61,7 +60,8 @@ jobs:
         path: error.png
 
     - name: Clean up old workflow runs
+      if: always() # 💡 建议设为 always()，这样即使 Renewal 失败了也会清理日志
       run: |
-        gh run delete --all --repo ${{ github.repository }} --keep 3
+        gh run delete --all --repo ${{ github.repository }} --keep 3 || echo "没有可清理的历史记录"
       env:
         GH_TOKEN: ${{ github.token }}
