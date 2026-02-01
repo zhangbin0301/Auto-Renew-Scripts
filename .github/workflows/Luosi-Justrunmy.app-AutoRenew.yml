@@ -32,7 +32,8 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt 
 
-    - name: Run Script
+    - name: Run Main Script
+      working-directory: scripts
       env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
