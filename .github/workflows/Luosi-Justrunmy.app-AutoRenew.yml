@@ -62,6 +62,6 @@ jobs:
     - name: Clean up old workflow runs
       if: always() # 💡 建议设为 always()，这样即使 Renewal 失败了也会清理日志
       run: |
-        gh run delete --all --repo ${{ github.repository }} --keep 3 || echo "没有可清理的历史记录"
+        gh run delete --all --repo ${{ github.repository }} --keep 2 || echo "没有可清理的历史记录"
       env:
         GH_TOKEN: ${{ github.token }}
