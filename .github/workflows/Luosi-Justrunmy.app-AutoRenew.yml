@@ -61,10 +61,10 @@ jobs:
         path: error.png
 
     - name: Clean up old workflow runs
-      uses: AdityaGarg8/delete-workflow-runs-action@v2.0.2
+      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       with:
-        token: ${{ github.token }}
         repository: ${{ github.repository }}
-        retain_days: 0
-        keep_minimum_runs: 3 # 建议保留最近的 3 次 
+        older-than-seconds: 86400  # 删除24小时前的记录
         
