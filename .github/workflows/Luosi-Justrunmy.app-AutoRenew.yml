@@ -60,8 +60,9 @@ jobs:
         path: error.png
 
     - name: Clean up old workflow runs
-      if: always() # 💡 建议设为 always()，这样即使 Renewal 失败了也会清理日志
-      run: |
-        gh run delete --all --repo ${{ github.repository }} --keep 2 || echo "没有可清理的历史记录"
+      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
       env:
-        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
+      with:
+        repository: ${{ github.repository }}
+        older-than-seconds: 86400  # 删除24小时前的记录
