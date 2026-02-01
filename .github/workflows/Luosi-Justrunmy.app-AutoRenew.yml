@@ -28,9 +28,7 @@ jobs:
 
     - name: Install dependencies
       working-directory: scripts
-      run: |
-        # python -m pip install --upgrade pip setuptools wheel
-        pip install -r requirements.txt 
+      run: pip install -r requirements.txt -q > /dev/null 2>&1
 
     - name: Run Main Script
       working-directory: scripts
