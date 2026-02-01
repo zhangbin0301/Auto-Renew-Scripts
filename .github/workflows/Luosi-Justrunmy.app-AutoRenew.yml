@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write   # ⚠️ 必须添加权限配置，允许 Action 修改仓库文件
+  actions: write   # 允许删除工作流运行记录
 
 jobs:
   run_renewal:
@@ -60,10 +61,10 @@ jobs:
         path: error.png
 
     - name: Clean up old workflow runs
-      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
+      uses: Mattraider/delete-workflow-runs-action@v2
       with:
+        token: ${{ github.token }}
         repository: ${{ github.repository }}
-        older-than-seconds: 86400  # 删除24小时前的记录
+        retain_days: 0
+        keep_minimum_runs: 3 # 建议保留最近的 3 次 
         
