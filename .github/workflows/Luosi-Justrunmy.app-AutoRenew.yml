@@ -61,7 +61,7 @@ jobs:
         path: error.png
 
     - name: Clean up old workflow runs
-      uses: Mattraider/delete-workflow-runs-action@v2
+      uses: AdityaGarg8/delete-workflow-runs-action@v2.0.2
       with:
         token: ${{ github.token }}
         repository: ${{ github.repository }}
