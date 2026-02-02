@@ -29,13 +29,12 @@ jobs:
 
       - name: 安装系统依赖
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgbm1 libasound2t64 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 xvfb
-
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgbm1 libasound2t64 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 xvfb > /dev/null
       - name: 安装 requirements.txt 依赖
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -q > /dev/null 2>&1
           
-      - name: 运行脚本
+      - name: 运行Main脚本
         env:
           HIDEN_EMAIL: ${{ secrets.HIDEN_EMAIL }}
           HIDEN_PWD: ${{ secrets.HIDEN_PWD }}
