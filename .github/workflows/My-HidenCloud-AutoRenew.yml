@@ -86,7 +86,7 @@ jobs:
             RENEWAL_STATUS="❌ 运行异常"
           fi
           
-          MESSAGE="☁️ *HidenCloud 续期报告*%0A📅 时间：$(TZ='Asia/Shanghai' date +'%m-%d %H:%M')%0A%0A🖥️ 服务器：${SERVER_ID:-未知}%0A📊 结果：${RENEWAL_STATUS}%0A🕛️ 旧到期：${OLD_DATE:-N/A}"
+          MESSAGE="☁️ *HidenCloud 续期通知*%0A📅 执行时间：$(TZ='Asia/Shanghai' date +'%m-%d %H:%M')%0A%0A🖥️ 服务器：${SERVER_ID:-未知}%0A📊 结果：${RENEWAL_STATUS}%0A🕛️ 旧到期：${OLD_DATE:-N/A}"
           [ ! -z "$NEW_DATE" ] && MESSAGE="${MESSAGE}%0A🕡️ *新到期*：${NEW_DATE}"
           MESSAGE="${MESSAGE}%0A%0A🔗 [运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           
