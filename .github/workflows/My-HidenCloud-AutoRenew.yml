@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 检出代码
+      - name: 检出仓库代码
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/HidenCloud-AutoRenew
@@ -31,6 +31,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgbm1 libasound2t64 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 xvfb > /dev/null
+      
       - name: 安装 requirements.txt 依赖
         run: pip install -r requirements.txt -q > /dev/null 2>&1
           
