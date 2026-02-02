@@ -1,0 +1,105 @@
+name: HidenCloud Auto Renew
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: write  # 允许修改 cookie.txt
+  actions: write   # 允许清理 workflow 记录
+  
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/HidenCloud-AutoRenew
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
+          fetch-depth: 0
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgbm1 libasound2t64 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 xvfb
+
+      - name: 安装 requirements.txt 依赖
+        run: pip install -r requirements.txt
+          
+      - name: 运行脚本
+        env:
+          HIDEN_EMAIL: ${{ secrets.HIDEN_EMAIL }}
+          HIDEN_PWD: ${{ secrets.HIDEN_PWD }}
+          SERVER_ID: ${{ secrets.SERVER_ID }}
+          DISPLAY: :99
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          python main.py
+
+      - name: 提交变更 (README & JSON)
+        if: always()
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add storage_state.json README.md || true
+          git commit -m "Update HidenCloud State [skip ci]" || echo "No changes"
+          git push origin ${{ github.ref_name }} || echo "Push failed"
+
+      # --- 保留并优化后的上传结果功能 ---
+      - name: 上传截图结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiden-cloud-results
+          path: |
+            *.png
+          retention-days: 3
+
+      - name: 发送 TG 通知
+        if: always()
+        env:
+          # 先在这里映射 Secret
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # 增加一个逻辑：只有当变量都不为空时才执行
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "未配置 Telegram 变量，跳过通知"
+            exit 0
+          fi
+
+          if [ -f "README.md" ]; then
+            SERVER_ID=$(grep "🖥️服务器ID：" README.md | sed 's/.*🖥️服务器ID：`\([^`]*\)`.*/\1/')
+            RENEWAL_STATUS=$(grep "📊续期结果：" README.md | sed 's/.*📊续期结果：\([^<]*\).*/\1/')
+            OLD_DATE=$(grep "🕛️旧到期时间：" README.md | sed 's/.*🕛️旧到期时间：`\([^`]*\)`.*/\1/')
+            NEW_DATE=$(grep "🕡️新到期时间：" README.md | sed 's/.*🕡️新到期时间：`\([^`]*\)`.*/\1/' || echo "")
+          else
+            RENEWAL_STATUS="❌ 运行异常"
+          fi
+          
+          MESSAGE="☁️ *HidenCloud 续期报告*%0A📅 时间：$(TZ='Asia/Shanghai' date +'%m-%d %H:%M')%0A%0A🖥️ 服务器：${SERVER_ID:-未知}%0A📊 结果：${RENEWAL_STATUS}%0A🕛️ 旧到期：${OLD_DATE:-N/A}"
+          [ ! -z "$NEW_DATE" ] && MESSAGE="${MESSAGE}%0A🕡️ *新到期*：${NEW_DATE}"
+          MESSAGE="${MESSAGE}%0A%0A🔗 [运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${MESSAGE}" \
+            -d parse_mode="Markdown"
+
+      - name: 清理运行历史
+        if: always()
+        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+        with:
+          repository: ${{ github.repository }}
+          older-than-seconds: 86400
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
