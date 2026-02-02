@@ -6,8 +6,8 @@ on:
     - cron: '0 0 * * *'
 
 permissions:
-  contents: write  # 允许修改 cookie.txt
-  actions: write   # 允许清理 workflow 记录
+  contents: write
+  actions: write
   
 jobs:
   renew:
@@ -32,9 +32,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgbm1 libasound2t64 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 xvfb > /dev/null
       
-      - name: 安装 requirements.txt 依赖
-        run: pip install -r requirements.txt -q > /dev/null 2>&1
-          
+      - name: 安装 Python 依赖并预下载浏览器
+        run: |
+          pip install -r requirements.txt -q
+                    
       - name: 运行Main脚本
         env:
           HIDEN_EMAIL: ${{ secrets.HIDEN_EMAIL }}
@@ -56,7 +57,6 @@ jobs:
           git commit -m "Update HidenCloud State [skip ci]" || echo "No changes"
           git push origin ${{ github.ref_name }} || echo "Push failed"
 
-      # --- 保留并优化后的上传结果功能 ---
       - name: 上传截图结果
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,13 +66,11 @@ jobs:
             *.png
           retention-days: 3
 
-      - name: 发送 TG 通知
+      - name: 发送 TG 通知 (保底监控)
         if: always()
         env:
-          # 先在这里映射 Secret
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        # 增加一个逻辑：只有当变量都不为空时才执行
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "未配置 Telegram 变量，跳过通知"
@@ -80,17 +78,15 @@ jobs:
           fi
 
           if [ -f "README.md" ]; then
-            SERVER_ID=$(grep "🖥️服务器ID：" README.md | sed 's/.*🖥️服务器ID：`\([^`]*\)`.*/\1/')
-            RENEWAL_STATUS=$(grep "📊续期结果：" README.md | sed 's/.*📊续期结果：\([^<]*\).*/\1/')
-            OLD_DATE=$(grep "🕛️旧到期时间：" README.md | sed 's/.*🕛️旧到期时间：`\([^`]*\)`.*/\1/')
-            NEW_DATE=$(grep "🕡️新到期时间：" README.md | sed 's/.*🕡️新到期时间：`\([^`]*\)`.*/\1/' || echo "")
+            # 改进了 sed 匹配逻辑，增加容错
+            SERVER_ID=$(grep -oP '服务器ID：`\K[^`]+' README.md || echo "65607")
+            RENEWAL_STATUS=$(grep -oP '续期结果】：\K.*' README.md | sed 's/<br>//g' || echo "运行结束")
+            OLD_DATE=$(grep -oP '旧到期时间：`\K[^`]+' README.md || echo "N/A")
           else
-            RENEWAL_STATUS="❌ 运行异常"
+            RENEWAL_STATUS="❌ README未生成"
           fi
           
-          MESSAGE="☁️ *HidenCloud 续期通知*%0A📅 执行时间：$(TZ='Asia/Shanghai' date +'%m-%d %H:%M')%0A%0A🖥️ 服务器：${SERVER_ID:-未知}%0A📊 结果：${RENEWAL_STATUS}%0A🕛️ 旧到期：${OLD_DATE:-N/A}"
-          [ ! -z "$NEW_DATE" ] && MESSAGE="${MESSAGE}%0A🕡️ *新到期*：${NEW_DATE}"
-          MESSAGE="${MESSAGE}%0A%0A🔗 [运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          MESSAGE="☁️ *HidenCloud 续期保底通知*%0A📅 执行时间：$(TZ='Asia/Shanghai' date +'%m-%d %H:%M')%0A%0A🖥️ 服务器：${SERVER_ID}%0A📊 结果：${RENEWAL_STATUS}%0A🕛️ 旧到期：${OLD_DATE}%0A%0A🔗 [运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
