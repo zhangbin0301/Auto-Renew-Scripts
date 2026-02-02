@@ -40,6 +40,8 @@ jobs:
           HIDEN_EMAIL: ${{ secrets.HIDEN_EMAIL }}
           HIDEN_PWD: ${{ secrets.HIDEN_PWD }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISPLAY: :99
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
