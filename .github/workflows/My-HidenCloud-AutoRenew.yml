@@ -66,33 +66,6 @@ jobs:
             *.png
           retention-days: 3
 
-      - name: 发送 TG 通知 (保底监控)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "未配置 Telegram 变量，跳过通知"
-            exit 0
-          fi
-
-          if [ -f "README.md" ]; then
-            # 改进了 sed 匹配逻辑，增加容错
-            SERVER_ID=$(grep -oP '服务器ID：`\K[^`]+' README.md || echo "65607")
-            RENEWAL_STATUS=$(grep -oP '续期结果】：\K.*' README.md | sed 's/<br>//g' || echo "运行结束")
-            OLD_DATE=$(grep -oP '旧到期时间：`\K[^`]+' README.md || echo "N/A")
-          else
-            RENEWAL_STATUS="❌ README未生成"
-          fi
-          
-          MESSAGE="☁️ *HidenCloud 续期保底通知*%0A📅 执行时间：$(TZ='Asia/Shanghai' date +'%m-%d %H:%M')%0A%0A🖥️ 服务器：${SERVER_ID}%0A📊 结果：${RENEWAL_STATUS}%0A🕛️ 旧到期：${OLD_DATE}%0A%0A🔗 [运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-          
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="${MESSAGE}" \
-            -d parse_mode="Markdown"
-
       - name: 清理运行历史
         if: always()
         uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
