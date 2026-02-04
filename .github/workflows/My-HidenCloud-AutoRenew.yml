@@ -17,7 +17,7 @@ jobs:
       - name: 检出仓库代码
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/HidenCloud-AutoRenew
+          repository: ${{ github.repository_owner }}/My-HidenCloud-AutoRenew
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
           fetch-depth: 0
 
