@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgbm1 libasound2t64 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 xvfb > /dev/null
       
-      - name: 安装 Python 依赖并预下载浏览器
+      - name: 安装 Python 依赖
         run: |
           pip install -r requirements.txt -q
                     
