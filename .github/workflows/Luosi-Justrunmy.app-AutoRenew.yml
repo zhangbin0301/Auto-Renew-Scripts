@@ -42,9 +42,7 @@ jobs:
       run: |
         LAST_RUN=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
         echo "最后执行时间: $LAST_RUN"
-        # 匹配 README.md 中的 标记并替换其下一行
-        # 如果 README 中没有该标记，这一步不会报错但也不会生效
-        sed -i "//{n;s/.*/Last Check-in: $LAST_RUN (Beijing Time)/;}" README.md  
+        sed -i "1c Last Check-in: $LAST_RUN (Beijing Time)" README.md
 
     - name: Commit and Push Changes
       if: success()
@@ -52,17 +50,18 @@ jobs:
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
         
-        # 独立检查每个文件，有变动才 add
-        [[ -n $(git status -s cookie.txt) ]] && git add cookie.txt && echo "Added cookie.txt"
-        [[ -n $(git status -s README.md) ]] && git add README.md && echo "Added README.md"
-        
-        # 只有在暂存区有变动时才提交
-        if ! git diff --cached --exit-code > /dev/null; then
-          git commit -m "chore: auto update status/cookie [skip ci]"
-          git push
-        else
-          echo "没有任何变动，跳过提交。"
+        # 1. cookie.txt 保持原有逻辑：有变化才 add
+        if [[ -n $(git status -s cookie.txt) ]]; then
+          git add cookie.txt
+          echo "cookie.txt has changed, adding to commit."
         fi
+        
+        # 2. README.md 直接 add，不做比较
+        git add README.md
+        echo "README.md added directly."
+        
+        # 提交并推送
+        git commit -m "chore: auto update status/cookie [skip ci]" && git push || echo "No changes to commit"
 
     - name: Upload Error Screenshot
       if: failure()
