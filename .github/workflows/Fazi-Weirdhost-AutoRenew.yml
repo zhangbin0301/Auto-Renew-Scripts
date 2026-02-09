@@ -34,6 +34,27 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
+
+      - name: Update README with Last Run Time
+        if: success()
+        working-directory: scripts
+        run: |
+          LAST_RUN=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          echo "最后执行时间: $LAST_RUN"
+          # 直接强制覆盖第 2 行
+          sed -i "2c Last Check-in: $LAST_RUN (Beijing Time)" README.md
+
+      - name: Commit and Push Changes
+        if: success()
+        working-directory: scripts
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # 直接 add README，不判断内容是否变化
+          git add README.md          
+          git commit -m "docs: update execution time [skip ci]" && git push || echo "Nothing to push"
+      
       
       - name: Upload response JSON files
         uses: actions/upload-artifact@v4
