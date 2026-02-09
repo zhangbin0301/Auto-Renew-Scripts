@@ -37,6 +37,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
+    - name: Update README with Last Run Time
+      if: success()
+      run: |
+        # 获取当前北京时间 (UTC+8)
+        LAST_RUN=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+        echo "最后执行时间: $LAST_RUN"
+        # 使用 sed 替换 README 中的占位符。注意：你的 README.md 中需要有 ...sed -i "//,//c\\nLast Check-in: $LAST_RUN (Beijing Time)\n" README.md  
+
     - name: Commit and Push Cookie Update
       if: success()
       run: |
