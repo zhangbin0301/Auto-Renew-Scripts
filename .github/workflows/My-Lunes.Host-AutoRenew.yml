@@ -2,8 +2,8 @@ name: My-Lunes.Host-AutoRenew
 
 on:
   schedule:
-    # 每 3 天运行一次 (UTC 时间 0:00)
-    - cron: '0 0 */3 * *'
+    # 每 4 天运行一次 (UTC 时间 0:00)
+    - cron: '0 0 */4 * *'
   workflow_dispatch: # 允许手动点击运行
 
 permissions:
