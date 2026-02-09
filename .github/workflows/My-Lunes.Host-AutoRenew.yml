@@ -68,11 +68,20 @@ jobs:
       - name: 提交变更 (README & JSON)
         if: always()
         run: |
+          # 修改 README 内容 (覆盖写入，包含时间戳)
+          CN_TIME=$(date -d "+8 hours" "+%Y-%m-%d %H:%M:%S")
+          echo "# Lunes.Host Auto Renew" > README.md
+          echo "" >> README.md
+          echo "✅ 任务最后执行时间 (北京): \`$CN_TIME\`" >> README.md
+          echo "" >> README.md
+          echo "> 状态由 GitHub Actions 自动维护" >> README.md
+          
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add storage_state.json README.md || true
-          git commit -m "Update Lunes.Host State [skip ci]" || echo "No changes"
-          git push origin ${{ github.ref_name }} || echo "Push failed"        
+          
+          git diff --staged --quiet || git commit -m "Update Lunes.Host State & README [skip ci]"
+          git push origin ${{ github.ref_name }} || echo "Push failed"
 
       - name: 上传截图结果
         if: always()
