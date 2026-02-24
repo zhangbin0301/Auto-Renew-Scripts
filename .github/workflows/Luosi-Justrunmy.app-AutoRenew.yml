@@ -29,13 +29,16 @@ jobs:
         python-version: '3.10'
 
     - name: Install dependencies
-      run: pip install -r requirements.txt -q > /dev/null 2>&1
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq xvfb libgtk-3-0 libdbus-glib-1-2 libasound2t64 libx11-xcb1 libgbm1 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxtst6
+        pip install -r requirements.txt -q > /dev/null 2>&1
 
     - name: Run Main Script
       env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python main.py
+      run: xvfb-run python main.py
 
     - name: Update README with Last Run Time
       if: success()
