@@ -19,7 +19,7 @@ jobs:
       uses: actions/checkout@v4
       with:
           # 注意：如果是本仓库，可以直接去掉 repository 那行，更简洁
-          repository: zhangbin0301/Luosi-Justrunmy.app-AutoRenew
+          repository: zhangbin0301/My-Justrunmy.app-AutoRenew
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           fetch-depth: 0
 
