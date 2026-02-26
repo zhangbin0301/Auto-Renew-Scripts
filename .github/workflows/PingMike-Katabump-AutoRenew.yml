@@ -8,9 +8,24 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
+  # ━━━ 清理超24小时的运行记录 ━━━
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 删除超24小时的运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 1
+          keep_minimum_runs: 3
+
+  # ━━━ 续期主任务 ━━━
   renew:
+    needs: cleanup
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -37,7 +52,15 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt -q
 
-      # 🚀 执行 Katabump 批量续期
+      # 🍪 恢复 Cookie 缓存
+      - name: Restore Cookie cache
+        uses: actions/cache/restore@v4
+        with:
+          path: scripts/katabump_cookie.json
+          key: katabump-cookie
+          restore-keys: katabump-cookie
+
+      # 🚀 执行 Katabump 续期
       - name: Run Katabump renew script
         working-directory: scripts
         env:
@@ -46,4 +69,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python kataBump_renew_batch.py
+          python katabump_renew.py
+
+      # 💾 保存 Cookie 缓存
+      - name: Save Cookie cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: scripts/katabump_cookie.json
+          key: katabump-cookie-${{ github.run_id }}
