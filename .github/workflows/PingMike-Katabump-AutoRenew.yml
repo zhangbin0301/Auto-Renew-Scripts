@@ -69,7 +69,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python katabump_renew.py
+          python kataBump_renew_batch.py
 
       # 💾 保存 Cookie 缓存
       - name: Save Cookie cache
