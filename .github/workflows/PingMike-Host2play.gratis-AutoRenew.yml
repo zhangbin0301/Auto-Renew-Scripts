@@ -1,4 +1,4 @@
-name: PingMike-host2play.gratis-AutoRenew
+name: PingMike-Host2play.gratis-AutoRenew
 
 on:
   workflow_dispatch:
