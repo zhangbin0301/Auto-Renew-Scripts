@@ -63,3 +63,12 @@ jobs:
           name: response-json
           path: scripts/response_*.json
           retention-days: 7
+
+      # 🧹 清理超24小时的运行记录
+      - name: Clean up old workflow runs
+        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          repository: ${{ github.repository }}
+          older-than-seconds: 86400          
