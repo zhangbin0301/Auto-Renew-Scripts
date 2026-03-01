@@ -1,4 +1,4 @@
-name: Faiz-Skybots.tech-AutoRenew
+name: My-Skybots.tech-AutoRenew
 
 on:
   schedule:
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout Private Repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/Faiz-Skybots.tech-AutoRenew  # 私库位置，格式: username/repo-name
+          repository: ${{ github.repository_owner }}/My-Skybots.tech-AutoRenew  # 私库位置，格式: username/repo-name
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: scripts
            
