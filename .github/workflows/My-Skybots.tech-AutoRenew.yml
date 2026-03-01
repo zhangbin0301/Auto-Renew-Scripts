@@ -72,6 +72,7 @@ jobs:
 
       # 🕐 更新运行时间记录
       - name: 更新时间
+        working-directory: scripts
         run: |
           echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
           git config user.name "github-actions"
