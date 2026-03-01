@@ -15,48 +15,43 @@ jobs:
     timeout-minutes: 10
     
     steps:
-      - name: Checkout Private Repo
+      - name: 检出私有仓库
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/My-Skybots.tech-AutoRenew  # 私库位置，格式: username/repo-name
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: scripts
-           
-      - name: Setup Python
+         
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
           cache-dependency-path: 'scripts/requirements.txt'
       
-      - name: Install Dependencies
+      - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
       
-      - name: Install Playwright Browser
-        run: |
-          playwright install chromium
-          playwright install-deps
-      
-      - name: Run SkyBots Script
+      - name: 运行 SkyBots 脚本
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         working-directory: scripts
         run: python main.py
       
-      - name: Commit Updated Session
+      - name: 提交会话文件
         if: success()
         working-directory: scripts
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add SKYBOTS_DISCORD_SESSION.json
-          git diff --staged --quiet || git commit -m "Update Discord session [skip ci]"
+          git add storage_state.json
+          git diff --staged --quiet || git commit -m "Update storage state session [skip ci]"
           git push || echo "No changes to push"
       
-      - name: Upload Error Screenshots
+      - name: 上传错误截图
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -64,7 +59,7 @@ jobs:
           path: scripts/screenshots/
           if-no-files-found: ignore
       
-      - name: Upload Server Data
+      - name: 上传服务器数据
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -76,7 +71,7 @@ jobs:
             scripts/renew_*.json
           if-no-files-found: ignore
       
-      - name: Failure Notification
+      - name: 失败通知
         if: failure()
         run: |
           echo "SkyBots script failed"
@@ -85,7 +80,7 @@ jobs:
           echo "Run ID: ${{ github.run_id }}"
 
       # 🕐 更新运行时间记录
-      - name: Update Time
+      - name: 更新时间
         working-directory: scripts
         run: |
           echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
@@ -96,7 +91,7 @@ jobs:
           git push || true
 
       # 🧹 清理超24小时的运行记录
-      - name: Clean up old workflow runs
+      - name: 清理旧运行记录
         uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
