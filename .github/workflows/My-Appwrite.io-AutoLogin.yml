@@ -1,87 +1,104 @@
 name: My-Appwrite.io-AutoLogin
 
 on:
-  schedule:
-    # UTC 19:12（北京时间 03:12）
-    - cron: "12 19 * * *"
-  workflow_dispatch:
+    # 每 3 天跑 1 次
+    # UTC 19:12 = 北京时间次日 03:12
+    schedule:
+        - cron: "12 19 */3 * *"
 
+    # 允许手动触发
+    workflow_dispatch:
+
+# 给 workflow 开写仓库和清理 actions 的权限
 permissions:
-  contents: write
-  actions: write
+    contents: write
+    actions: write
 
-jobs:    
-  # ━━━ 续期主任务 ━━━
-  renew:    
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+jobs:
+    renew:
+        # 运行环境
+        runs-on: ubuntu-latest
 
-    steps:
-      # ✅ 检出私库 katabump-auto
-      - name: Checkout private repo (katabump-auto)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/My-Appwrite.io-AutoLogin
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          path: scripts
+        # 最长运行 30 分钟，超时自动终止
+        timeout-minutes: 30
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+        steps:
+            # 检出仓库代码到 scripts 目录
+            - name: Checkout private repo (My-Appwrite.io-AutoLogin)
+              uses: actions/checkout@v4
+              with:
+                  repository: ${{ github.repository_owner }}/My-Appwrite.io-AutoLogin
+                  token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+                  path: scripts
 
-      # 📦 安装系统依赖 + Python 依赖
-      - name: Install dependencies
-        working-directory: scripts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          pip install --upgrade pip
-          pip install -r requirements.txt -q
+            # 安装 Python 3.10
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
 
-      # 🍪 恢复 Cookie 缓存
-      - name: Restore Cookie cache
-        uses: actions/cache/restore@v4
-        with:
-          path: scripts/katabump_cookie.json
-          key: katabump-cookie
-          restore-keys: katabump-cookie
+            # 安装系统依赖、Python 依赖、Playwright 浏览器
+            - name: Install dependencies
+              working-directory: scripts
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y xvfb
+                  pip install --upgrade pip
+                  pip install -r requirements.txt -q
+                  playwright install --with-deps chromium
 
-      # 🚀 执行 Katabump 续期
-      - name: Run Katabump renew script
-        working-directory: scripts
-        env:
-          KATABUMP_BATCH: ${{ secrets.KATABUMP_BATCH }}
-          HEADLESS: "true"
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python Appwrite_main.py
+            # 恢复上一次保存的 storage state
+            # 如果第一次没有缓存，这一步会自动跳过，不会报致命错误
+            - name: Restore storage state cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: scripts/appwrite-storage-state.json
+                  key: appwrite-storage-state
+                  restore-keys: appwrite-storage-state
 
-      # 💾 保存 Cookie 缓存
-      - name: Save Cookie cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: scripts/katabump_cookie.json
-          key: katabump-cookie-${{ github.run_id }}
+            # 运行 Appwrite 自动登录脚本
+            # 逻辑：
+            #   1. 先尝试 storage state
+            #   2. storage 失效则回退账号密码登录
+            #   3. 登录成功后覆盖更新 storage
+            - name: Run Appwrite auto login script
+              working-directory: scripts
+              env:
+                  APPWRITE_EMAIL: ${{ secrets.APPWRITE_EMAIL }}
+                  APPWRITE_PASSWORD: ${{ secrets.APPWRITE_PASSWORD }}
+                  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+                  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+                  HEADLESS: "1"
+                  MAX_RETRIES: "3"
+                  RETRY_DELAY_MS: "3000"
+              run: |
+                  python3 login_appwrite_retry_notify.py
 
-      # 🕐 更新运行时间记录
-      - name: Update Time
-        working-directory: scripts
-        run: |
-          echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add time.txt
-          git diff --cached --quiet || git commit -m "🕐 更新运行时间"
-          git push || true
+            # 保存新的 storage state
+            # 只有文件存在时才缓存，避免首次失败时报错
+            - name: Save storage state cache
+              if: ${{ always() && hashFiles('scripts/appwrite-storage-state.json') != '' }}
+              uses: actions/cache/save@v4
+              with:
+                  path: scripts/appwrite-storage-state.json
+                  key: appwrite-storage-state-${{ github.run_id }}
 
-      # 🧹 清理超24小时的运行记录
-      - name: Clean up old workflow runs
-        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          repository: ${{ github.repository }}
-          older-than-seconds: 86400
+            # 更新最后运行时间并提交到仓库
+            - name: Update Time
+              working-directory: scripts
+              run: |
+                  echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
+                  git config user.name "github-actions"
+                  git config user.email "actions@github.com"
+                  git add time.txt
+                  git diff --cached --quiet || git commit -m "🕐 更新运行时间"
+                  git push || true
+
+            # 清理 24 小时以前的旧 workflow 运行记录
+            - name: Clean up old workflow runs
+              uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              with:
+                  repository: ${{ github.repository }}
+                  older-than-seconds: 86400
