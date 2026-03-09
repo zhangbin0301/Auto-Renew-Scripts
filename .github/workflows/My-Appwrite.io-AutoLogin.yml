@@ -1,0 +1,87 @@
+name: My-Appwrite.io-AutoLogin
+
+on:
+  schedule:
+    # UTC 19:12（北京时间 03:12）
+    - cron: "12 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:    
+  # ━━━ 续期主任务 ━━━
+  renew:    
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ✅ 检出私库 katabump-auto
+      - name: Checkout private repo (katabump-auto)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/My-Appwrite.io-AutoLogin
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: scripts
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # 📦 安装系统依赖 + Python 依赖
+      - name: Install dependencies
+        working-directory: scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          pip install --upgrade pip
+          pip install -r requirements.txt -q
+
+      # 🍪 恢复 Cookie 缓存
+      - name: Restore Cookie cache
+        uses: actions/cache/restore@v4
+        with:
+          path: scripts/katabump_cookie.json
+          key: katabump-cookie
+          restore-keys: katabump-cookie
+
+      # 🚀 执行 Katabump 续期
+      - name: Run Katabump renew script
+        working-directory: scripts
+        env:
+          KATABUMP_BATCH: ${{ secrets.KATABUMP_BATCH }}
+          HEADLESS: "true"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python Appwrite_main.py
+
+      # 💾 保存 Cookie 缓存
+      - name: Save Cookie cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: scripts/katabump_cookie.json
+          key: katabump-cookie-${{ github.run_id }}
+
+      # 🕐 更新运行时间记录
+      - name: Update Time
+        working-directory: scripts
+        run: |
+          echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add time.txt
+          git diff --cached --quiet || git commit -m "🕐 更新运行时间"
+          git push || true
+
+      # 🧹 清理超24小时的运行记录
+      - name: Clean up old workflow runs
+        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          repository: ${{ github.repository }}
+          older-than-seconds: 86400
