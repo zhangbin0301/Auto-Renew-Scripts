@@ -16,9 +16,7 @@ const MODE = 3;
 
 // --- 注册任务配置 ---
 // 邀请链接，通过此链接注册可为主账号积累积分
-const REGISTER_URL =
-  process.env.TARGET_URL ||
-  "https://manager.teoheberg.fr/register?ref=Smm2rXkN";
+const REGISTER_URL = "https://manager.teoheberg.fr/register?ref=q1xCEvAK";
 
 // --- 续期任务配置 ---
 // NOTE: COOKIE_NAME 是固定的 Session Cookie 键名，COOKIE_VALUE 是登录令牌
@@ -350,9 +348,13 @@ async function getRemainingTime(page) {
  */
 async function getCoins(page) {
   try {
-    // 加上 .d-lg-inline 类名，精准定位到金币数字容器
-    const text = await page.locator("#userDropdown span.d-lg-inline").innerText();
-    return text.trim();
+    // 增加显式等待，确保菜单加载完成
+    await page.waitForSelector("#userDropdown", { state: "attached", timeout: 10000 });
+    // 使用 textContent 即使元素被隐藏也能拿到文字
+    const rawText = await page.locator("#userDropdown").textContent();
+    // 匹配类似 19.94 的数字
+    const match = rawText && rawText.match(/\d+(\.\d+)?/);
+    return match ? match[0] : "未知";
   } catch (e) {
     return "未知";
   }
@@ -426,6 +428,7 @@ async function taskRegister() {
 
     context = await chromium.launchPersistentContext(profile, {
       headless: false,
+      viewport: { width: 1920, height: 1080 },
       args: launchArgs,
     });
 
@@ -500,6 +503,7 @@ async function taskRenew() {
 
     context = await chromium.launchPersistentContext(USER_DATA, {
       headless: false,
+      viewport: { width: 1920, height: 1080 },
       args: launchArgs,
     });
 
