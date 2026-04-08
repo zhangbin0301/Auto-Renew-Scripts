@@ -26,6 +26,7 @@ const COOKIE_VALUE =
   "eyJpdiI6InBHZU5sS2xDaDkwZDRub2VWNmZUdFE9PSIsInZhbHVlIjoiKzF2VS92MDFGRU5ZK0FhTjY4Q090VEVOWjJTcVVJU2xKcmtNVTJ1UkFoU0ZVU3lUejFReW1ZaUx6QkJjN1loYTZ5VmpmNDl2LzcvZFZtYmpZY2Y0WFIwSHNCZGptZm1sMSs4UmI5empRTEtZMldublk4VlAzNlIwMmdqNTBxL0lzOFJ0N0lMbk0zZzh0dzRpTFpTb052ZzB5TUFCQ0h2ZXVyNXRXODNDUHQwb2tkTEt2NEJtejFKMnQ1cE5kazB1QjlBbWtXM1JyRHFoQklMQkhGazFDL1I3WEwzTkw3Mi9EWFVyRDI3dXgrbz0iLCJtYWMiOiJiMmM3MWU1ZjAwZGY4ZDBmNjUyZTJhMTU5OTlhNDE4ZmI2ZTFjMzM4ZTcxZGM2ZmIxODI0Y2JiNGYzZmY1NDRhIiwidGFnIjoiIn0=";
 
 const SERVERS_URL = "https://manager.teoheberg.fr/servers";
+const HOME_URL = "https://manager.teoheberg.fr/home";
 
 // --- 公共配置 ---
 const MAX_RETRY = 1; // 刷积分时注册账号的数量 / 任务失败后的重试次数
@@ -348,11 +349,15 @@ async function getRemainingTime(page) {
  */
 async function getCoins(page) {
   try {
-    // 增加显式等待，确保菜单加载完成
-    await page.waitForSelector("#userDropdown", { state: "attached", timeout: 10000 });
-    // 使用 textContent 即使元素被隐藏也能拿到文字
+    // 优先尝试从 Home 页面大的“Crédits”卡片抓取，这比导航栏更稳定
+    const creditsBlock = page.locator('h6:has-text("Crédits")');
+    if (await creditsBlock.count()) {
+      // 选取 h6 紧邻的 span 元素内容
+      const text = await page.locator('h6:has-text("Crédits") + span').innerText();
+      return text.trim();
+    }
+    // 兜底方案：如果不在主页，尝试从用户下拉菜单里抓取数字部分
     const rawText = await page.locator("#userDropdown").textContent();
-    // 匹配类似 19.94 的数字
     const match = rawText && rawText.match(/\d+(\.\d+)?/);
     return match ? match[0] : "未知";
   } catch (e) {
@@ -592,7 +597,10 @@ async function taskRenew() {
       await saveDebug(page, "renew_done");
     }
 
-    // 获取最终的金币数和时间
+    // 重点优化：专门去 Home 页面抓取最准确的金币数
+    console.log("➡️ 前往主页抓取金币数...");
+    await page.goto(HOME_URL);
+    await page.waitForLoadState("networkidle");
     let finalCoins = await getCoins(page);
 
     // 发送 Telegram 报告
