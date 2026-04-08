@@ -12,7 +12,7 @@ const USE_WARP = true;  // 是否开启 WARP (防止 IP 被禁)。开启: true, 
 // 1: 仅刷积分 (注册)
 // 2: 仅续期
 // 3: 组合模式 (先刷积分，再跑续期) - 默认推荐
-const MODE = 1;
+const MODE = 3;
 
 // --- 注册任务配置 ---
 // 邀请链接，通过此链接注册可为主账号积累积分
@@ -30,7 +30,7 @@ const COOKIE_VALUE =
 const SERVERS_URL = "https://manager.teoheberg.fr/servers";
 
 // --- 公共配置 ---
-const MAX_RETRY = 3; // 刷积分时注册账号的数量 / 任务失败后的重试次数
+const MAX_RETRY = 1; // 刷积分时注册账号的数量 / 任务失败后的重试次数
 const SCREEN_DIR = path.resolve(__dirname, "screenshots");
 const USER_DATA = path.resolve(__dirname, "user_data");
 const AUDIO_SOLVER = path.resolve(__dirname, "solve-audio.py");
