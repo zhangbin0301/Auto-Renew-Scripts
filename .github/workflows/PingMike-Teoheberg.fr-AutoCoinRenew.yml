@@ -1,0 +1,139 @@
+name: PingMike-Teoheberg.fr-AutoCoinRenew
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *' # 每天北京时间凌晨 2 点运行
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # =========================
+      # 📥 检出私有代码仓库
+      # =========================
+      - name: 📥 检出私有代码仓库
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/PingMike-Teoheberg.fr-AutoCoinRenew
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      # =========================
+      # 🟢 Node.js
+      # =========================
+      - name: 🟢 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # =========================
+      # 🐍 Python（用于语音识别）
+      # =========================
+      - name: 🐍 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # =========================
+      # 📦 安装所有依赖
+      # =========================
+      - name: 📦 安装所有依赖
+        run: |
+          npm init -y
+          npm install playwright axios
+          sudo apt-get update
+          sudo apt-get install -y xvfb ffmpeg curl p7zip-full pulseaudio
+          pip install SpeechRecognition pydub
+
+      # =========================
+      # 🌐 安装 Playwright 浏览器
+      # =========================
+      - name: 🌐 安装 Chromium 浏览器
+        run: npx playwright install chromium
+
+      # =========================
+      # 🔊 虚拟音频环境 (破解音频验证码必需)
+      # =========================
+      - name: 🔊 设置虚拟音频环境
+        run: |
+          pulseaudio --start || true
+          pactl load-module module-null-sink sink_name=virtual_speaker || true
+          pactl set-default-sink virtual_speaker || true
+
+      # =========================
+      # 🔍 检查 bot.js 里的 WARP 开关
+      # =========================
+      - name: 🔍 检查 WARP 开关状态
+        id: check_warp
+        run: |
+          if grep -q "const USE_WARP = true" bot.js; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+          fi
+
+      # =========================
+      # 🌐 可选 WARP (根据 bot.js 配置决定)
+      # =========================
+      - name: 🌐 运行 WARP
+        if: steps.check_warp.outputs.enabled == 'true'
+        uses: fscarmen/warp-on-actions@v1.3
+        with:
+          stack: dual
+          mode: client
+
+      # =========================
+      # 🚀 运行 Bot
+      # =========================
+      - name: 🚀 运行机器人
+        env:
+          TEOHEBERG_REMEMBER_WEB_COOKIE: ${{ secrets.TEOHEBERG_REMEMBER_WEB_COOKIE }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          # 确保截图目录存在
+          mkdir -p screenshots
+          # 使用 xvfb 运行，支持 headless: false 模式下的浏览器
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" node bot.js
+
+      # =========================
+      # 📸 上传截图 (如果失败)
+      # =========================
+      - name: 📸 上传调试截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          retention-days: 3
+          
+       # =========================
+       # 🕐 更新运行时间记录
+       # =========================
+      - name: 上传时间到time.txt
+        working-directory: scripts
+        run: |
+          echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add time.txt
+          git diff --cached --quiet || git commit -m "🕐 更新运行时间"
+          git push || true    
+
+      # =========================
+      # 🧹 自动清理历史记录 (保持 Actions 页面干净)
+      # =========================
+      - name: 🧹 清理历史运行记录
+        if: always()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3
