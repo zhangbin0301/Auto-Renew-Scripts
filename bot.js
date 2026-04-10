@@ -11,7 +11,7 @@ const USE_WARP = true;  // 是否开启 WARP (防止 IP 被禁)。开启: true, 
 // --- 运行模式设置 ---
 // 1: 仅刷积分 (注册)
 // 2: 仅续期
-// 3: 组合模式 (先刷积分，再跑续期) - 默认推荐
+// 3: 组合模式 (续期百百落实，刷分由系统动态指派路径：每周仅随机执行 2 次)
 const MODE = 3;
 
 // --- 注册任务配置 ---
@@ -47,6 +47,133 @@ if (!fs.existsSync(SCREEN_DIR)) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (a, b) => Math.random() * (b - a) + a;
+
+/* ================= 指纹库 (Fingerprint Library) ================= */
+
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+];
+
+const LOCALES = ["fr-FR", "en-US", "en-GB", "de-DE", "it-IT", "zh-CN"];
+const TIMEZONES = ["Europe/Paris", "Europe/London", "Europe/Berlin", "Europe/Rome", "Asia/Shanghai"];
+
+/**
+ * 生成随机浏览器指纹配置
+ */
+function getRandomFingerprint() {
+  const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  const locale = LOCALES[Math.floor(Math.random() * LOCALES.length)];
+  const timezone = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
+  const width = 1920 + Math.floor(rand(-100, 100));
+  const height = 1080 + Math.floor(rand(-100, 100));
+
+  console.log(`🎭 注入指纹 | UA: ${ua.slice(0, 40)}... | Locale: ${locale} | Viewport: ${width}x${height}`);
+
+  return {
+    userAgent: ua,
+    locale: locale,
+    timezoneId: timezone,
+    viewport: { width, height },
+  };
+}
+
+/* ================= IP 切换 & 等待 ================= */
+
+/**
+ * 切换 IP (需本地安装 warp-cli)
+ */
+async function rotateIP() {
+  if (!USE_WARP) return;
+  console.log("🌀 正在尝试通过 WARP 切换 IP...");
+  try {
+    // 适配 Windows/Linux 的 warp-cli 命令
+    execSync("warp-cli disconnect", { stdio: "ignore" });
+    await sleep(3000);
+    execSync("warp-cli connect", { stdio: "ignore" });
+    await sleep(8000); // 给点时间建立连接
+    console.log("✅ IP 切换流程完成");
+  } catch (e) {
+    console.log("⚠️ WARP 切换指令执行失败 (请确认是否安装并启动了 WARP 客户端)");
+  }
+}
+
+/**
+ * 随机长时间等待 (带倒计时进度)
+ * @param {number} min 分钟
+ * @param {number} max 分钟
+ */
+async function waitLong(min, max) {
+  const waitMinutes = rand(min, max);
+  let waitSeconds = Math.floor(waitMinutes * 60);
+  console.log(`\n⏳ 进入随机长时间等待: ${waitMinutes.toFixed(2)} 分钟 (${waitSeconds} 秒)...`);
+
+  const interval = 30; // 每 30 秒打印一次进度
+  while (waitSeconds > 0) {
+    if (waitSeconds <= interval) {
+      await sleep(waitSeconds * 1000);
+      break;
+    }
+    await sleep(interval * 1000);
+    waitSeconds -= interval;
+    console.log(`  🕒 还剩约 ${Math.floor(waitSeconds / 60)} 分 ${waitSeconds % 60} 秒`);
+  }
+  console.log("✅ 等待结束，恢复任务");
+}
+
+/**
+ * 获取 ISO 周数 (1-53)
+ */
+function getISOWeek() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+/**
+ * 根据周数生成本周的确定性刷分日期 (0-6)
+ * 该算法保证每周固定选中 2 天，且每周选中的日期自动变化
+ */
+function getWeeklySchedule() {
+  const week = getISOWeek();
+  const year = new Date().getFullYear();
+  // 简单的种子随机算法：结合周数、年份和配置
+  const seed = week * 31 + year * 7 + (REGISTER_URL.length);
+  
+  const days = [0, 1, 2, 3, 4, 5, 6];
+  const result = [];
+  
+  let currentSeed = seed;
+  const pseudoRandom = () => {
+    currentSeed = (currentSeed * 9301 + 49297) % 233280;
+    return currentSeed / 233280;
+  };
+
+  for (let i = 0; i < 2; i++) {
+    const idx = Math.floor(pseudoRandom() * days.length);
+    result.push(days.splice(idx, 1)[0]);
+  }
+  
+  return result.sort();
+}
+
+/**
+ * 检查今日是否为指派的刷分日
+ */
+function isRegisterDay() {
+  const today = new Date().getDay();
+  const schedule = getWeeklySchedule();
+  const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  
+  console.log(`📅 本周抽中刷分日: ${schedule.map(d => dayNames[d]).join(", ")}`);
+  
+  return schedule.includes(today);
+}
 
 /**
  * 检查 Buster 插件是否存在
@@ -135,15 +262,26 @@ async function humanize(page) {
 /* ================= 账号生成（注册专用） ================= */
 
 /**
- * 生成随机注册账号
- * NOTE: 无需真实邮箱，Teoheberg 注册无邮箱验证步骤
+ * 拟人化账号生成：使用词库组合，避免死板的 user 前缀
  */
 function genAccount() {
-  const name = "user" + Date.now().toString().slice(-6);
+  const adjs = ["Cool", "Happy", "Lucky", "Swift", "Bright", "Dark", "Wild", "Great", "Iron", "Gold", "Alpha", "Star", "Mega", "Super"];
+  const names = ["Panda", "Tiger", "Bird", "Cloud", "Shadow", "Knight", "Coder", "Gamer", "Player", "Star", "Lion", "Wolf", "Hunter", "Ace"];
+  
+  const prefix = adjs[Math.floor(Math.random() * adjs.length)];
+  const suffix = names[Math.floor(Math.random() * names.length)];
+  
+  // 随机组合并加入混淆后缀
+  const name = `${prefix}${suffix}_${Math.random().toString(36).slice(2, 5)}`;
+  
+  // 随机邮箱后缀
+  const domains = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com"];
+  const domain = domains[Math.floor(Math.random() * domains.length)];
+
   return {
     name,
-    email: `${name}@gmail.com`,
-    password: "Aa!" + Math.random().toString(36).slice(2, 10),
+    email: `${name.toLowerCase()}@${domain}`,
+    password: "Aa!" + Math.random().toString(36).slice(2, 11),
   };
 }
 
@@ -431,9 +569,12 @@ async function taskRegister() {
       launchArgs.push(`--load-extension=${EXT_BUSTER}`);
     }
 
+    // 注入随机指纹
+    const fingerprint = getRandomFingerprint();
+
     context = await chromium.launchPersistentContext(profile, {
       headless: false,
-      viewport: { width: 1920, height: 1080 },
+      ...fingerprint,
       args: launchArgs,
     });
 
@@ -449,12 +590,19 @@ async function taskRegister() {
     console.log("🧾 生成账号:", acc);
 
     await page.goto(REGISTER_URL, { waitUntil: "networkidle" });
+    await humanize(page);
 
     // 填写注册表单
     await page.fill('input[name="name"]', acc.name);
+    await sleep(rand(800, 2000));
     await page.fill('input[name="email"]', acc.email);
+    await sleep(rand(800, 2000));
     await page.fill('input[name="password"]', acc.password);
+    await sleep(rand(800, 2000));
     await page.fill('input[name="password_confirmation"]', acc.password);
+    await sleep(rand(500, 1500));
+
+    await humanize(page);
 
     // NOTE: 点击 label 而非 input，否则勾选可能无效
     await page.click('label[for="terms"]', { force: true });
@@ -506,9 +654,12 @@ async function taskRenew() {
       launchArgs.push(`--load-extension=${EXT_BUSTER}`);
     }
 
+    // 注入随机指纹
+    const fingerprint = getRandomFingerprint();
+
     context = await chromium.launchPersistentContext(USER_DATA, {
       headless: false,
-      viewport: { width: 1920, height: 1080 },
+      ...fingerprint,
       args: launchArgs,
     });
 
@@ -625,6 +776,9 @@ async function taskRenew() {
 (async () => {
   console.log(`\n🚀 Teoheberg Bot 启动 | 当前模式: ${MODE}`);
 
+  // 启动即先换一次 IP，确保干净
+  if (USE_WARP) await rotateIP();
+
   // 函数：执行注册循环
   const runRegisterLoop = async () => {
     let successCount = 0;
@@ -644,20 +798,33 @@ async function taskRenew() {
     return successCount;
   };
 
-  if (MODE === 1) {
+  const effectiveMode = MODE;
+
+  if (effectiveMode === 1) {
     // 模式 1: 仅注册刷分
     await runRegisterLoop();
-  } else if (MODE === 2) {
+  } else if (effectiveMode === 2) {
     // 模式 2: 仅续期
     await taskRenew();
-  } else if (MODE === 3) {
-    // 模式 3: 先刷分后续期
-    console.log("⏳ 正在执行第一阶段：刷积分注册");
-    await runRegisterLoop();
-    console.log("\n⏳ 正在执行第二阶段：主账号续期");
+  } else if (effectiveMode === 3) {
+    // 模式 3: 续期必做，刷分动态指派 (每周 2 次)
+    const canRegister = isRegisterDay();
+    
+    if (canRegister) {
+      console.log("🎲 命中本周刷分指派日，开始刷积分注册");
+      await runRegisterLoop();
+      
+      console.log("⏳ 第一阶段结束，进入任务间长等待...");
+      await waitLong(5, 20);
+      if (USE_WARP) await rotateIP();
+    } else {
+      console.log("💤 今日非指派刷分日，保持静默，直接进入续期流程");
+    }
+
+    console.log("\n🔄 执行核心任务：主账号续期");
     await taskRenew();
   } else {
-    console.log(`❌ 未知模式: ${MODE}，请设置 1, 2 或 3`);
+    console.log(`❌ 未知模式: ${effectiveMode}，请设置 1, 2 或 3`);
     process.exit(1);
   }
 
