@@ -107,16 +107,18 @@ async function rotateIP() {
   // 尝试的命令列表：Windows 仅用 warp-cli，Linux 增加 sudo 尝试
   const commands = process.platform === "win32" ? ["warp-cli"] : ["warp-cli", "sudo warp-cli"];
   let success = false;
+  let lastError = "";
 
   for (const cmd of commands) {
     try {
-      execSync(`${cmd} disconnect`, { stdio: "ignore" });
+      execSync(`${cmd} disconnect`, { stdio: "pipe" });
       await sleep(3000);
-      execSync(`${cmd} connect`, { stdio: "ignore" });
+      execSync(`${cmd} connect`, { stdio: "pipe" });
       await sleep(8000); // 给点时间建立连接
       success = true;
       break;
-    } catch {
+    } catch (err) {
+      lastError = err.stderr ? err.stderr.toString() : err.message;
       continue;
     }
   }
@@ -125,7 +127,7 @@ async function rotateIP() {
   if (success) {
     console.log(`✅ IP 切换流程完成 (之前: ${oldIP} -> 现在: ${newIP})`);
   } else {
-    console.log(`⚠️ WARP 旋转指令执行失败 (当前 IP: ${newIP}，由于权限或环境限制无法动态切换)`);
+    console.log(`⚠️ WARP 旋转指令执行失败 (当前 IP: ${newIP}，原因为: ${lastError.trim()})`);
   }
 }
 
@@ -513,7 +515,7 @@ async function taskRenew(runSummary = "") {
     await page.goto(HOME_URL);
     const finalCoins = await getCoins(page);
     const sched = getRegisterScheduleInfo();
-    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 今日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
+    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 本日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
     console.log("\n" + report);
     await sendTelegram(report);
   } finally { if (context) await context.close(); }
@@ -542,7 +544,7 @@ async function taskRenew(runSummary = "") {
     await taskRenew("⏩ 模式 2：跳过注册");
   } else if (effectiveMode === 3) {
     const sched = getRegisterScheduleInfo();
-    let regSummary = "💤 今日非指派刷分日，跳过";
+    let regSummary = "💤 非指派刷分日，跳过";
     if (sched.isToday) {
       console.log("🎲 命中刷分日");
       const successCount = await runRegisterLoop();
