@@ -517,7 +517,7 @@ async function taskRenew(runSummary = "") {
     await page.goto(HOME_URL);
     const finalCoins = await getCoins(page);
     const sched = getRegisterScheduleInfo();
-    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 今日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
+    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 本日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
     console.log("\n" + report);
     await sendTelegram(report);
   } finally { if (context) await context.close(); }
@@ -546,7 +546,7 @@ async function taskRenew(runSummary = "") {
     await taskRenew("⏩ 模式 2：跳过注册");
   } else if (effectiveMode === 3) {
     const sched = getRegisterScheduleInfo();
-    let regSummary = "💤 今日非指派刷分日，跳过";
+    let regSummary = "💤 非指派刷分日，跳过";
     if (sched.isToday) {
       console.log("🎲 命中刷分日");
       const successCount = await runRegisterLoop();
