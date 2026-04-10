@@ -12,7 +12,8 @@ const USE_WARP = true;  // 是否开启 WARP (防止 IP 被禁)。开启: true, 
 // 1: 仅刷积分 (注册)
 // 2: 仅续期
 // 3: 组合模式 (续期百百落实，刷分由系统动态指派路径：每周仅随机执行 2 次)
-const MODE = 3;
+// 4: 纯调试模式 (仅测试 WARP IP 旋转是否成功，十几秒即可跑完，不打开浏览器)
+const MODE = 4;
 
 // --- 注册任务配置 ---
 // 邀请链接，通过此链接注册可为主账号积累积分
@@ -104,8 +105,9 @@ async function rotateIP() {
   const oldIP = await getCurrentIP();
   console.log(`🌀 正在尝试切换 IP (当前: ${oldIP})...`);
 
-  // 尝试的命令列表：Windows 仅用 warp-cli，Linux 增加 sudo 尝试
-  const commands = process.platform === "win32" ? ["warp-cli"] : ["warp-cli", "sudo warp-cli"];
+  // 尝试的命令列表：Windows 仅用 warp-cli，Linux 增加 sudo 尝试，并加上 --accept-tos 免去 TTY 询问条款
+  const isWin = process.platform === "win32";
+  const commands = isWin ? ["warp-cli"] : ["warp-cli --accept-tos", "sudo warp-cli --accept-tos"];
   let success = false;
   let lastError = "";
 
@@ -515,7 +517,7 @@ async function taskRenew(runSummary = "") {
     await page.goto(HOME_URL);
     const finalCoins = await getCoins(page);
     const sched = getRegisterScheduleInfo();
-    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 本日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
+    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 今日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
     console.log("\n" + report);
     await sendTelegram(report);
   } finally { if (context) await context.close(); }
@@ -544,7 +546,7 @@ async function taskRenew(runSummary = "") {
     await taskRenew("⏩ 模式 2：跳过注册");
   } else if (effectiveMode === 3) {
     const sched = getRegisterScheduleInfo();
-    let regSummary = "💤 非指派刷分日，跳过";
+    let regSummary = "💤 今日非指派刷分日，跳过";
     if (sched.isToday) {
       console.log("🎲 命中刷分日");
       const successCount = await runRegisterLoop();
@@ -553,6 +555,8 @@ async function taskRenew(runSummary = "") {
       if (USE_WARP) await rotateIP();
     }
     await taskRenew(regSummary);
+  } else if (effectiveMode === 4) {
+    console.log("🏁 [模式 4 调试] IP 旋转测试已执行完毕，直接退出程序以节省时间。");
   } else {
     process.exit(1);
   }
