@@ -84,34 +84,60 @@ function getRandomFingerprint() {
 /* ================= IP 切换 & 等待 ================= */
 
 /**
+ * 获取当前的公网 IP 信息
+ */
+async function getCurrentIP() {
+  try {
+    const res = await axios.get("https://api.ipify.org?format=json", { timeout: 5000 });
+    return res.data.ip;
+  } catch {
+    return "未知";
+  }
+}
+
+/**
  * 切换 IP (需本地安装 warp-cli)
  */
 async function rotateIP() {
   if (!USE_WARP) return;
-  console.log("🌀 正在尝试通过 WARP 切换 IP...");
-  try {
-    // 适配 Windows/Linux 的 warp-cli 命令
-    execSync("warp-cli disconnect", { stdio: "ignore" });
-    await sleep(3000);
-    execSync("warp-cli connect", { stdio: "ignore" });
-    await sleep(8000); // 给点时间建立连接
-    console.log("✅ IP 切换流程完成");
-  } catch (e) {
-    console.log("⚠️ WARP 切换指令执行失败 (请确认是否安装并启动了 WARP 客户端)");
+  
+  const oldIP = await getCurrentIP();
+  console.log(`🌀 正在尝试切换 IP (当前: ${oldIP})...`);
+
+  // 尝试的命令列表：Windows 仅用 warp-cli，Linux 增加 sudo 尝试
+  const commands = process.platform === "win32" ? ["warp-cli"] : ["warp-cli", "sudo warp-cli"];
+  let success = false;
+
+  for (const cmd of commands) {
+    try {
+      execSync(`${cmd} disconnect`, { stdio: "ignore" });
+      await sleep(3000);
+      execSync(`${cmd} connect`, { stdio: "ignore" });
+      await sleep(8000); // 给点时间建立连接
+      success = true;
+      break;
+    } catch {
+      continue;
+    }
+  }
+
+  const newIP = await getCurrentIP();
+  if (success) {
+    console.log(`✅ IP 切换流程完成 (之前: ${oldIP} -> 现在: ${newIP})`);
+  } else {
+    console.log(`⚠️ WARP 旋转指令执行失败 (当前 IP: ${newIP}，由于权限或环境限制无法动态切换)`);
   }
 }
 
 /**
  * 随机长时间等待 (带倒计时进度)
- * @param {number} min 分钟
- * @param {number} max 分钟
  */
 async function waitLong(min, max) {
   const waitMinutes = rand(min, max);
   let waitSeconds = Math.floor(waitMinutes * 60);
   console.log(`\n⏳ 进入随机长时间等待: ${waitMinutes.toFixed(2)} 分钟 (${waitSeconds} 秒)...`);
 
-  const interval = 30; // 每 30 秒打印一次进度
+  const interval = 30;
   while (waitSeconds > 0) {
     if (waitSeconds <= interval) {
       await sleep(waitSeconds * 1000);
@@ -137,12 +163,10 @@ function getISOWeek() {
 
 /**
  * 根据周数生成本周的确定性刷分日期 (0-6)
- * 该算法保证每周固定选中 2 天，且每周选中的日期自动变化
  */
 function getWeeklySchedule() {
   const week = getISOWeek();
   const year = new Date().getFullYear();
-  // 简单的种子随机算法：结合周数、年份和配置
   const seed = week * 31 + year * 7 + (REGISTER_URL.length);
   
   const days = [0, 1, 2, 3, 4, 5, 6];
@@ -163,16 +187,25 @@ function getWeeklySchedule() {
 }
 
 /**
+ * 获取今日刷分指派信息的格式化描述
+ */
+function getRegisterScheduleInfo() {
+  const schedule = getWeeklySchedule();
+  const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const scheduleStr = schedule.map(d => dayNames[d]).join(", ");
+  return {
+    isToday: schedule.includes(new Date().getDay()),
+    text: `📅 本周抽中刷分日: ${scheduleStr}`
+  };
+}
+
+/**
  * 检查今日是否为指派的刷分日
  */
 function isRegisterDay() {
-  const today = new Date().getDay();
-  const schedule = getWeeklySchedule();
-  const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-  
-  console.log(`📅 本周抽中刷分日: ${schedule.map(d => dayNames[d]).join(", ")}`);
-  
-  return schedule.includes(today);
+  const info = getRegisterScheduleInfo();
+  console.log(info.text);
+  return info.isToday;
 }
 
 /**
@@ -183,7 +216,7 @@ function hasBuster() {
 }
 
 /**
- * 等待插件加载（原始 register.js 逻辑）
+ * 等待插件加载
  */
 async function waitExtensionLoaded(context) {
   for (let i = 0; i < 60; i++) {
@@ -197,28 +230,19 @@ async function waitExtensionLoaded(context) {
 }
 
 /**
- * 保存调试信息：同时截图 + 保存 HTML 源码
- * @param {import('playwright').Page} page
- * @param {string} name 文件名标识
+ * 保存调试信息
  */
 async function saveDebug(page, name) {
   try {
     const ts = Date.now();
-    await page.screenshot({
-      path: `${SCREEN_DIR}/${ts}_${name}.png`,
-      fullPage: true,
-    });
-    fs.writeFileSync(
-      `${SCREEN_DIR}/${ts}_${name}.html`,
-      await page.content()
-    );
+    await page.screenshot({ path: `${SCREEN_DIR}/${ts}_${name}.png`, fullPage: true });
+    fs.writeFileSync(`${SCREEN_DIR}/${ts}_${name}.html`, await page.content());
     console.log("📸 已保存调试信息:", name);
   } catch { }
 }
 
 /**
- * 获取北京时间（UTC+8）
- * @returns {string} 格式化时间字符串
+ * 获取时间
  */
 function getBeijingTime() {
   const date = new Date();
@@ -228,27 +252,21 @@ function getBeijingTime() {
 }
 
 /**
- * 发送 Telegram 通知
- * @param {string} text 消息内容
+ * TG 通知
  */
 async function sendTelegram(text) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!chatId || !botToken) return;
-
   try {
-    await axios.post(
-      `https://api.telegram.org/bot${botToken}/sendMessage`,
-      { chat_id: chatId, text }
-    );
+    await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, { chat_id: chatId, text });
   } catch (e) {
     console.log("⚠️ Telegram 发送失败:", e.message);
   }
 }
 
 /**
- * 模拟人类鼠标行为，降低机器人检测概率
- * @param {import('playwright').Page} page
+ * 拟人化行为
  */
 async function humanize(page) {
   console.log("🤸 模拟人类行为");
@@ -259,25 +277,17 @@ async function humanize(page) {
   }
 }
 
-/* ================= 账号生成（注册专用） ================= */
-
 /**
- * 拟人化账号生成：使用词库组合，避免死板的 user 前缀
+ * 账号生成
  */
 function genAccount() {
   const adjs = ["Cool", "Happy", "Lucky", "Swift", "Bright", "Dark", "Wild", "Great", "Iron", "Gold", "Alpha", "Star", "Mega", "Super"];
   const names = ["Panda", "Tiger", "Bird", "Cloud", "Shadow", "Knight", "Coder", "Gamer", "Player", "Star", "Lion", "Wolf", "Hunter", "Ace"];
-  
   const prefix = adjs[Math.floor(Math.random() * adjs.length)];
   const suffix = names[Math.floor(Math.random() * names.length)];
-  
-  // 随机组合并加入混淆后缀
   const name = `${prefix}${suffix}_${Math.random().toString(36).slice(2, 5)}`;
-  
-  // 随机邮箱后缀
   const domains = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com"];
   const domain = domains[Math.floor(Math.random() * domains.length)];
-
   return {
     name,
     email: `${name.toLowerCase()}@${domain}`,
@@ -286,193 +296,94 @@ function genAccount() {
 }
 
 /* ================= 验证码处理 ================= */
-
-/**
- * 点击 reCAPTCHA 复选框
- * @param {import('playwright').Page} page
- */
 async function clickCheckbox(page) {
-  // NOTE: 超时设 120s，因为验证码 iframe 有时加载较慢
-  const iframe = await page.waitForSelector('iframe[src*="anchor"]', {
-    timeout: 120000,
-  });
+  const iframe = await page.waitForSelector("iframe[src*=\"anchor\"]", { timeout: 120000 });
   const frame = await iframe.contentFrame();
   const box = await frame.waitForSelector("#recaptcha-anchor");
   await box.click({ force: true });
   await sleep(2000);
 }
 
-/**
- * 检测 reCAPTCHA 是否弹出了进一步的图像/音频挑战
- * @param {import('playwright').Page} page
- * @returns {import('playwright').Frame | null} 挑战 frame，null 表示无挑战
- */
 async function waitChallenge(page) {
   try {
-    const iframe = await page.waitForSelector('iframe[src*="bframe"]', {
-      timeout: 10000,
-    });
+    const iframe = await page.waitForSelector("iframe[src*=\"bframe\"]", { timeout: 10000 });
     return await iframe.contentFrame();
-  } catch {
-    // 没有弹出挑战 = 已直接通过
-    return null;
-  }
+  } catch { return null; }
 }
 
-/**
- * 核心：对称点击 Buster 按钮（原始 register.js 逻辑）
- */
 async function clickBuster(page, frame) {
   const reload = frame.locator("#recaptcha-reload-button");
   const audio = frame.locator("#recaptcha-audio-button");
-
   await reload.waitFor();
   await audio.waitFor();
-
   const r = await reload.boundingBox();
   const a = await audio.boundingBox();
-
   if (!r || !a) throw new Error("❌ 坐标失败");
-
   const dx = a.x - r.x;
   const dy = a.y - r.y;
-
   const x = a.x + dx;
   const y = a.y + dy;
-
-  console.log("📍 Buster solver 坐标:", Math.round(x), Math.round(y));
-
   await page.mouse.click(x, y);
   await page.waitForTimeout(5000);
 }
 
-/**
- * 使用音频识别解决 reCAPTCHA 挑战
- * NOTE: 调用独立的 solve-audio.py，替代 heredoc 写法，保证 Windows 兼容
- * @param {import('playwright').Frame} bframe 挑战弹窗 frame
- */
 async function solveAudio(bframe) {
   console.log("🎧 音频验证码识别中...");
-
   await bframe.locator("#recaptcha-audio-button").click();
   await sleep(4000);
-
   const src = await bframe.locator("#audio-source").getAttribute("src");
   if (!src) throw new Error("❌ 找不到音频链接");
-
   const mp3File = path.join(os.tmpdir(), `captcha_${Date.now()}.mp3`);
   const wavFile = mp3File.replace(".mp3", ".wav");
-
-  // 下载音频文件
   execSync(`curl -s "${src}" -o "${mp3File}"`, { stdio: "ignore" });
-
-  // 转换为 WAV 格式（speech_recognition 要求）
-  execSync(
-    `ffmpeg -loglevel error -y -i "${mp3File}" "${wavFile}"`,
-    { stdio: "ignore" }
-  );
-
-  // 调用独立 Python 脚本进行语音识别
-  const text = execSync(`python "${AUDIO_SOLVER}" "${wavFile}"`)
-    .toString()
-    .trim();
-
+  execSync(`ffmpeg -loglevel error -y -i "${mp3File}" "${wavFile}"`, { stdio: "ignore" });
+  const text = execSync(`python "${AUDIO_SOLVER}" "${wavFile}"`).toString().trim();
   if (!text) throw new Error("❌ 语音识别返回空");
-
   console.log("🗣️ 识别结果:", text);
-
   await bframe.locator("#audio-response").fill(text);
   await bframe.locator("#recaptcha-verify-button").click();
   await sleep(5000);
-
-  // 清理临时音频文件
-  try {
-    fs.unlinkSync(mp3File);
-    fs.unlinkSync(wavFile);
-  } catch { }
+  try { fs.unlinkSync(mp3File); fs.unlinkSync(wavFile); } catch { }
 }
 
-/**
- * 轮询检测验证码是否真正通过
- * NOTE: 来自 register.js 的精华逻辑，同时检测 token 和 aria-checked
- * @param {import('playwright').Page} page
- * @param {number} timeout 最长等待毫秒数
- */
 async function waitSolved(page, timeout = 180000) {
   const start = Date.now();
-
   while (Date.now() - start < timeout) {
-    // 检测方式 1：g-recaptcha-response textarea 是否有 token
     for (const f of page.frames()) {
       try {
-        const token = await f.evaluate(() =>
-          document.querySelector("textarea[name='g-recaptcha-response']")?.value
-        );
-        if (token && token.length > 30) {
-          console.log("✅ 验证码 token 已获取");
-          return true;
-        }
+        const token = await f.evaluate(() => document.querySelector("textarea[name='g-recaptcha-response']")?.value);
+        if (token && token.length > 30) return true;
       } catch { }
     }
-
-    // 检测方式 2：anchor frame 中复选框是否已勾选
     const anchor = page.frames().find((f) => f.url().includes("anchor"));
     if (anchor) {
       try {
-        const checked = await anchor.evaluate(
-          () =>
-            document
-              .querySelector("#recaptcha-anchor")
-              ?.getAttribute("aria-checked") === "true"
-        );
-        if (checked) {
-          console.log("✅ 验证码复选框已通过");
-          return true;
-        }
+        const checked = await anchor.evaluate(() => document.querySelector("#recaptcha-anchor")?.getAttribute("aria-checked") === "true");
+        if (checked) return true;
       } catch { }
     }
-
     await sleep(2000);
   }
-
-  throw new Error("❌ 验证码超时（180s）");
+  throw new Error("❌ 验证码超时");
 }
 
-/**
- * 统一验证码处理入口
- * 流程：点击复选框 → 检测挑战 → 音频识别/Buster插件（如有）→ 轮询确认通过
- * @param {import('playwright').Page} page
- */
 async function solveCaptcha(page) {
   console.log("🧠 开始处理验证码");
-
   await clickCheckbox(page);
   await saveDebug(page, "captcha_checkbox");
-
   const bframe = await waitChallenge(page);
-
   if (bframe) {
     if (hasBuster()) {
-      console.log("🤖 检测到 Buster 插件，启动插件破解");
       await clickBuster(page, bframe);
     } else {
-      console.log("🎯 未检测到插件，启动音频识别");
       await solveAudio(bframe);
     }
-  } else {
-    console.log("✅ 无挑战，复选框直接通过");
   }
-
   await waitSolved(page);
   await saveDebug(page, "captcha_solved");
 }
 
-/* ================= 续期专用：时间检测 ================= */
-
-/**
- * 从页面读取服务器剩余时间
- * @param {import('playwright').Page} page
- */
+/* ================= 续期逻辑辅助 ================= */
 async function getRemainingTime(page) {
   const block = page.locator("text=Renewal Required In").first();
   const parent = block.locator("xpath=..");
@@ -481,353 +392,167 @@ async function getRemainingTime(page) {
   return match ? match[1].trim() : text.trim();
 }
 
-/**
- * 抓取当前账号剩余金币数
- * @param {import('playwright').Page} page
- */
 async function getCoins(page) {
   try {
-    // 优先尝试从 Home 页面大的“Crédits”卡片抓取，这比导航栏更稳定
-    const creditsBlock = page.locator('h6:has-text("Crédits")');
+    const creditsBlock = page.locator("h6:has-text(\"Crédits\")");
     if (await creditsBlock.count()) {
-      // 选取 h6 紧邻的 span 元素内容
-      const text = await page.locator('h6:has-text("Crédits") + span').innerText();
+      const text = await page.locator("h6:has-text(\"Crédits\") + span").innerText();
       return text.trim();
     }
-    // 兜底方案：如果不在主页，尝试从用户下拉菜单里抓取数字部分
     const rawText = await page.locator("#userDropdown").textContent();
     const match = rawText && rawText.match(/\d+(\.\d+)?/);
     return match ? match[0] : "未知";
-  } catch (e) {
-    return "未知";
-  }
+  } catch (e) { return "未知"; }
 }
 
-/**
- * 判断是否需要续期（剩余时间 ≤ 1 天时触发）
- * @param {import('playwright').Page} page
- */
 async function shouldRenew(page) {
   console.log("🔍 检查是否需要续期...");
   try {
     const remainingTime = await getRemainingTime(page);
     console.log("📊 当前剩余时间:", remainingTime);
-
     const dayMatch = remainingTime.match(/(\d+)\s*day/i);
     const hourMatch = remainingTime.match(/(\d+)\s*h/i);
     const lessThan = /less than 1/i.test(remainingTime);
-
-    const need =
-      (dayMatch && parseInt(dayMatch[1]) <= 1) ||
-      (hourMatch && parseInt(hourMatch[1]) < 24) ||
-      lessThan;
-
+    const need = (dayMatch && parseInt(dayMatch[1]) <= 1) || (hourMatch && parseInt(hourMatch[1]) < 24) || lessThan;
     return { need, remainingTime };
-  } catch (e) {
-    console.log("⚠️ 检测剩余时间失败，默认尝试续期:", e.message);
-    return { need: true, remainingTime: "未知" };
-  }
+  } catch (e) { return { need: true, remainingTime: "未知" }; }
 }
 
-/**
- * 尝试点击提交/Verify 按钮
- * @param {import('playwright').Page} page
- */
 async function clickVerify(page) {
   for (let i = 0; i < 20; i++) {
-    let btn = page.locator("button:has-text('Verify')");
+    let btn = page.locator("button:has-text(\'Verify\')");
     if (await btn.count()) return await btn.first().click();
-
-    btn = page.locator("button[type='submit']");
+    btn = page.locator("button[type=\'submit\']");
     if (await btn.count()) return await btn.first().click();
-
     await sleep(1000);
   }
-  throw new Error("❌ 找不到提交按钮");
+  throw new Error("❌ 找不到按钮");
 }
 
 /* ================= 任务模块 ================= */
 
-/**
- * 注册任务：通过邀请链接注册新账号以为主账号积累积分
- * NOTE: 注册账号与续期主账号是完全独立的两套账号体系
- *       注册完成后无需保存 Cookie，直接结束即可
- */
 async function taskRegister() {
   console.log("\n📝 [注册模式] 开始");
-
-  let context;
-  let page;
-
+  let context, page;
   try {
-    // NOTE: 使用独立临时目录，避免与续期的 user_data 混用
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "pw-reg-"));
-
     const launchArgs = ["--no-sandbox"];
     if (hasBuster()) {
-      launchArgs.push(`--disable-extensions-except=${EXT_BUSTER}`);
-      launchArgs.push(`--load-extension=${EXT_BUSTER}`);
+      launchArgs.push(`--disable-extensions-except=${EXT_BUSTER}`, `--load-extension=${EXT_BUSTER}`);
     }
-
-    // 注入随机指纹
     const fingerprint = getRandomFingerprint();
-
-    context = await chromium.launchPersistentContext(profile, {
-      headless: false,
-      ...fingerprint,
-      args: launchArgs,
-    });
-
-    if (hasBuster()) {
-      if (!(await waitExtensionLoaded(context))) {
-        throw new Error("❌ Buster 未加载");
-      }
-    }
-
+    context = await chromium.launchPersistentContext(profile, { headless: false, ...fingerprint, args: launchArgs });
+    if (hasBuster()) await waitExtensionLoaded(context);
     page = await context.newPage();
-
     const acc = genAccount();
     console.log("🧾 生成账号:", acc);
-
     await page.goto(REGISTER_URL, { waitUntil: "networkidle" });
     await humanize(page);
-
-    // 填写注册表单
-    await page.fill('input[name="name"]', acc.name);
-    await sleep(rand(800, 2000));
-    await page.fill('input[name="email"]', acc.email);
-    await sleep(rand(800, 2000));
-    await page.fill('input[name="password"]', acc.password);
-    await sleep(rand(800, 2000));
-    await page.fill('input[name="password_confirmation"]', acc.password);
-    await sleep(rand(500, 1500));
-
+    await page.fill("input[name=\"name\"]", acc.name);
+    await sleep(rand(800, 1500));
+    await page.fill("input[name=\"email\"]", acc.email);
+    await sleep(rand(800, 1500));
+    await page.fill("input[name=\"password\"]", acc.password);
+    await sleep(rand(800, 1500));
+    await page.fill("input[name=\"password_confirmation\"]", acc.password);
+    await page.click("label[for=\"terms\"]", { force: true });
     await humanize(page);
-
-    // NOTE: 点击 label 而非 input，否则勾选可能无效
-    await page.click('label[for="terms"]', { force: true });
-
-    console.log("☑️ 表单填写完成");
-    await saveDebug(page, "register_form");
-
-    // 过验证码
     await solveCaptcha(page);
-
-    // NOTE: 使用 form.submit() 而非点击按钮，更可靠
-    console.log("🚀 提交注册表单");
     await page.evaluate(() => document.querySelector("form").submit());
-
     await sleep(8000);
-    await saveDebug(page, "register_done");
-
     console.log("🎉 注册成功");
     return { ok: true };
   } catch (e) {
     console.log("💥 注册失败:", e.message);
-    if (page) await saveDebug(page, "register_error");
     return { ok: false };
-  } finally {
-    if (context) await context.close();
-  }
+  } finally { if (context) await context.close(); }
 }
 
-/**
- * 续期任务：检查主账号服务器剩余时间并在到期前自动续期
- * NOTE: 续期账号通过 TEOHEBERG_REMEMBER_WEB_COOKIE 环境变量注入
- *       与注册账号完全独立，使用固定的 COOKIE_NAME（Session 键名）
- */
-async function taskRenew() {
+async function taskRenew(runSummary = "") {
   console.log("\n🔄 [续期模式] 开始");
-
-  if (!COOKIE_VALUE) {
-    console.log("❌ 找不到 Cookie，请设置环境变量或检查硬编码。");
-    process.exit(1);
-  }
-
-  let context;
-  let page;
-
+  let context, page;
   try {
-    const launchArgs = ["--no-sandbox"];
-    if (hasBuster()) {
-      launchArgs.push(`--disable-extensions-except=${EXT_BUSTER}`);
-      launchArgs.push(`--load-extension=${EXT_BUSTER}`);
-    }
-
-    // 注入随机指纹
     const fingerprint = getRandomFingerprint();
-
-    context = await chromium.launchPersistentContext(USER_DATA, {
-      headless: false,
-      ...fingerprint,
-      args: launchArgs,
-    });
-
-    if (hasBuster()) {
-      if (!(await waitExtensionLoaded(context))) {
-        console.log("⚠️ Buster 加载失败，将回退到音频识别");
-      }
-    }
-
+    context = await chromium.launchPersistentContext(USER_DATA, { headless: false, ...fingerprint, args: ["--no-sandbox"] });
     page = await context.newPage();
-
-    // 注入主账号 Cookie
-    await context.addCookies([
-      {
-        name: COOKIE_NAME,
-        value: COOKIE_VALUE,
-        domain: "manager.teoheberg.fr",
-        path: "/",
-      },
-    ]);
-
-    console.log("➡️ 打开服务器列表");
+    await context.addCookies([{ name: COOKIE_NAME, value: COOKIE_VALUE, domain: "manager.teoheberg.fr", path: "/" }]);
     await page.goto(SERVERS_URL);
     await page.waitForLoadState("networkidle");
-
     const { need, remainingTime: before } = await shouldRenew(page);
-
-    let reportStatus = "";
-    let finalTime = before;
-
-    if (!need) {
-      reportStatus = "ℹ️ 未到期，无需续期";
-      console.log(reportStatus);
-    } else {
-      // 执行续期（带重试）
+    let reportStatus = "ℹ️ 未到期", finalTime = before;
+    if (need) {
       let success = false;
-
       for (let i = 1; i <= MAX_RETRY; i++) {
-        console.log(`\n🔄 续期尝试 ${i}/${MAX_RETRY}`);
-
         try {
           await humanize(page);
-
           const renewBtn = page.locator("a.btn-success:has-text('Renew')");
           if (!(await renewBtn.count())) {
-            console.log("⚠️ 找不到 Renew 按钮，可能已续期");
+            console.log("⚠️ 找不到 Renew 按钮，可能已提前续期");
+            reportStatus = "✅ 未找到Renew 按钮";
             success = true;
             break;
           }
 
           await renewBtn.first().click();
           await sleep(5000);
-
-          // 如果弹出验证码则处理
-          if (await page.locator('iframe[src*="recaptcha"]').count()) {
-            await solveCaptcha(page);
-          }
-
+          if (await page.locator('iframe[src*="recaptcha"]').count()) await solveCaptcha(page);
           await clickVerify(page);
           await sleep(8000);
-
-          console.log("🎉 续期成功");
+          reportStatus = "✅ 续期成功";
           success = true;
           break;
-        } catch (e) {
-          console.log(`❌ 第 ${i} 次续期失败:`, e.message);
-          await saveDebug(page, `renew_fail_${i}`);
-
-          if (i < MAX_RETRY) {
-            console.log("↩️ 返回服务器列表重试");
-            await page.goto(SERVERS_URL);
-            await sleep(5000);
-          }
+        } catch (e) { 
+          if (i === MAX_RETRY) reportStatus = "⚠️ 续期失败"; 
+          console.log(`❌ 第 ${i} 次续期尝试出错:`, e.message);
+          await page.goto(SERVERS_URL); 
         }
       }
-
-      // 刷新页面重读最新剩余时间
       await page.goto(SERVERS_URL);
-      await page.waitForLoadState("networkidle");
-
-      try {
-        finalTime = await getRemainingTime(page);
-      } catch { }
-
-      reportStatus = success ? "✅ 续期成功" : "⚠️ 续期失败";
-      await saveDebug(page, "renew_done");
+      try { finalTime = await getRemainingTime(page); } catch { }
     }
-
-    // 重点优化：专门去 Home 页面抓取最准确的金币数
-    console.log("➡️ 前往主页抓取金币数...");
     await page.goto(HOME_URL);
-    await page.waitForLoadState("networkidle");
-    let finalCoins = await getCoins(page);
-
-    // 发送 Telegram 报告
-    const report = `
-📋 Teoheberg 服务器续期报告
-
-📊 续期状态: ${reportStatus}
-💰 账户金币: ${finalCoins}
-💡 剩余时间: ${finalTime}
-🕐 运行时间: ${getBeijingTime()}
-`.trim();
-
+    const finalCoins = await getCoins(page);
+    const sched = getRegisterScheduleInfo();
+    const report = `📋 Teoheberg 每日运行报告\n\n${sched.text}\n🎭 今日行动: ${runSummary || "未安排注册任务"}\n\n📊 续期状态: ${reportStatus}\n💰 账户金币: ${finalCoins}\n💡 剩余时间: ${finalTime}\n🕐 运行时间: ${getBeijingTime()}`;
     console.log("\n" + report);
     await sendTelegram(report);
-  } finally {
-    if (context) await context.close();
-  }
+  } finally { if (context) await context.close(); }
 }
 
 /* ================= 入口 ================= */
 
 (async () => {
-  console.log(`\n🚀 Teoheberg Bot 启动 | 当前模式: ${MODE}`);
-
-  // 启动即先换一次 IP，确保干净
+  console.log(`\n🚀 Teoheberg Bot 启动 | 模式: ${MODE}`);
   if (USE_WARP) await rotateIP();
 
-  // 函数：执行注册循环
   const runRegisterLoop = async () => {
     let successCount = 0;
     for (let i = 1; i <= MAX_RETRY; i++) {
-      console.log(`\n🔄 注册尝试 ${i}/${MAX_RETRY}`);
       const r = await taskRegister();
-      if (r.ok) {
-        successCount++;
-        console.log(`✅ 第 ${i} 次注册成功`);
-        if (i < MAX_RETRY) await sleep(4000);
-      } else {
-        console.log(`❌ 第 ${i} 次注册失败`);
-        await sleep(4000);
-      }
+      if (r.ok) successCount++;
+      if (i < MAX_RETRY) await sleep(4000);
     }
-    console.log(`\n📊 注册统计：成功 ${successCount}/${MAX_RETRY}`);
     return successCount;
   };
 
   const effectiveMode = MODE;
-
   if (effectiveMode === 1) {
-    // 模式 1: 仅注册刷分
     await runRegisterLoop();
   } else if (effectiveMode === 2) {
-    // 模式 2: 仅续期
-    await taskRenew();
+    await taskRenew("⏩ 模式 2：跳过注册");
   } else if (effectiveMode === 3) {
-    // 模式 3: 续期必做，刷分动态指派 (每周 2 次)
-    const canRegister = isRegisterDay();
-    
-    if (canRegister) {
-      console.log("🎲 命中本周刷分指派日，开始刷积分注册");
-      await runRegisterLoop();
-      
-      console.log("⏳ 第一阶段结束，进入任务间长等待...");
+    const sched = getRegisterScheduleInfo();
+    let regSummary = "💤 今日非指派刷分日，跳过";
+    if (sched.isToday) {
+      console.log("🎲 命中刷分日");
+      const successCount = await runRegisterLoop();
+      regSummary = `✅ 命中刷分日，完成 ${successCount} 个账号注册`;
       await waitLong(5, 20);
       if (USE_WARP) await rotateIP();
-    } else {
-      console.log("💤 今日非指派刷分日，保持静默，直接进入续期流程");
     }
-
-    console.log("\n🔄 执行核心任务：主账号续期");
-    await taskRenew();
+    await taskRenew(regSummary);
   } else {
-    console.log(`❌ 未知模式: ${effectiveMode}，请设置 1, 2 或 3`);
     process.exit(1);
   }
-
-  console.log("\n🏁 所有任务执行完毕");
   process.exit(0);
 })();
