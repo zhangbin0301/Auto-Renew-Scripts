@@ -101,7 +101,7 @@ async function getCurrentIP() {
  */
 async function rotateIP() {
   if (!USE_WARP) return;
-  
+
   const oldIP = await getCurrentIP();
   console.log(`🌀 正在尝试切换 IP (当前: ${oldIP})...`);
 
@@ -154,12 +154,25 @@ async function waitLong(min, max) {
   console.log("✅ 等待结束，恢复任务");
 }
 
+/* ================= 时区与日期工具 ================= */
+
 /**
- * 获取 ISO 周数 (1-53)
+ * 获取当前的北京时间 (UTC+8) Date 对象
+ * 解决服务器处于 UTC 或其它时区时，导致刷分日判定失效的问题
+ */
+function getBeijingDate() {
+  const date = new Date();
+  const utc = date.getTime() + date.getTimezoneOffset() * 60000;
+  return new Date(utc + 8 * 3600000);
+}
+
+/**
+ * 获取北京时间下的 ISO 周数 (1-53)
  */
 function getISOWeek() {
-  const d = new Date();
+  const d = getBeijingDate();
   d.setHours(0, 0, 0, 0);
+  // ISO 周数计算：周四所在的周即为该年第几周
   d.setDate(d.getDate() + 4 - (d.getDay() || 7));
   const yearStart = new Date(d.getFullYear(), 0, 1);
   return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
@@ -167,15 +180,17 @@ function getISOWeek() {
 
 /**
  * 根据周数生成本周的确定性刷分日期 (0-6)
+ * 使用北京时间作为种子源
  */
 function getWeeklySchedule() {
+  const bjDate = getBeijingDate();
   const week = getISOWeek();
-  const year = new Date().getFullYear();
+  const year = bjDate.getFullYear();
   const seed = week * 31 + year * 7 + (REGISTER_URL.length);
-  
+
   const days = [0, 1, 2, 3, 4, 5, 6];
   const result = [];
-  
+
   let currentSeed = seed;
   const pseudoRandom = () => {
     currentSeed = (currentSeed * 9301 + 49297) % 233280;
@@ -186,7 +201,7 @@ function getWeeklySchedule() {
     const idx = Math.floor(pseudoRandom() * days.length);
     result.push(days.splice(idx, 1)[0]);
   }
-  
+
   return result.sort();
 }
 
@@ -195,10 +210,15 @@ function getWeeklySchedule() {
  */
 function getRegisterScheduleInfo() {
   const schedule = getWeeklySchedule();
+  const bjDate = getBeijingDate();
   const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const scheduleStr = schedule.map(d => dayNames[d]).join(", ");
+  
+  // 核心修复：使用北京时间的 getDay() 进行比对
+  const isToday = schedule.includes(bjDate.getDay());
+  
   return {
-    isToday: schedule.includes(new Date().getDay()),
+    isToday: isToday,
     text: `📅 本周抽中刷分日: ${scheduleStr}`
   };
 }
@@ -246,13 +266,10 @@ async function saveDebug(page, name) {
 }
 
 /**
- * 获取时间
+ * 获取格式化的北京时间字符串 (用于报告)
  */
 function getBeijingTime() {
-  const date = new Date();
-  const utc = date.getTime() + date.getTimezoneOffset() * 60000;
-  const beijing = new Date(utc + 8 * 3600000);
-  return beijing.toISOString().replace("T", " ").split(".")[0];
+  return getBeijingDate().toISOString().replace("T", " ").split(".")[0];
 }
 
 /**
@@ -505,10 +522,10 @@ async function taskRenew(runSummary = "") {
           reportStatus = "✅ 续期成功";
           success = true;
           break;
-        } catch (e) { 
-          if (i === MAX_RETRY) reportStatus = "⚠️ 续期失败"; 
+        } catch (e) {
+          if (i === MAX_RETRY) reportStatus = "⚠️ 续期失败";
           console.log(`❌ 第 ${i} 次续期尝试出错:`, e.message);
-          await page.goto(SERVERS_URL); 
+          await page.goto(SERVERS_URL);
         }
       }
       await page.goto(SERVERS_URL);
