@@ -16,11 +16,21 @@ def main() -> None:
     wav_path = sys.argv[1]
     recognizer = sr.Recognizer()
 
-    with sr.AudioFile(wav_path) as source:
-        audio = recognizer.record(source)
+    try:
+        with sr.AudioFile(wav_path) as source:
+            audio = recognizer.record(source)
 
-    text = recognizer.recognize_google(audio)
-    print(text)
+        text = recognizer.recognize_google(audio)
+        print(text)
+    except sr.UnknownValueError:
+        # 听不清时静默退出，主脚本会处理空返回
+        pass
+    except sr.RequestError as e:
+        # 网络或 API 错误
+        print(f"Service Error: {e}", file=sys.stderr)
+    except Exception as e:
+        # 其它异常
+        print(f"Error: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
