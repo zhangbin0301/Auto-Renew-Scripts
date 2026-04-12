@@ -11,13 +11,14 @@ const USE_WARP = true;  // 是否开启 WARP (防止 IP 被禁)。开启: true, 
 // --- 运行模式设置 ---
 // 1: 仅刷积分 (注册)
 // 2: 仅续期
-// 3: 组合模式 (续期百百落实，刷分由系统动态指派路径：每周仅随机执行 2 次)
-// 4: 纯调试模式 (仅测试 WARP IP 旋转是否成功，十几秒即可跑完，不打开浏览器)
-const MODE = 1;
+// 3: 组合模式 (续期落实，刷分由系统动态指派路径：每周仅随机执行 2 次)
+const MODE = 3;
 
 // --- 注册任务配置 ---
 // 邀请链接，通过此链接注册可为主账号积累积分
 const REGISTER_URL = "https://manager.teoheberg.fr/register?ref=q1xCEvAK";
+const SUCCESS_TARGET = 1; // 每日目标成功注册的账号数量
+const MAX_RETRY = 3;      // 针对单个任务（注册或续期）的最大尝试次数上限
 
 // --- 续期任务配置 ---
 // NOTE: COOKIE_NAME 是固定的 Session Cookie 键名，COOKIE_VALUE 是登录令牌
@@ -29,8 +30,7 @@ const COOKIE_VALUE =
 const SERVERS_URL = "https://manager.teoheberg.fr/servers";
 const HOME_URL = "https://manager.teoheberg.fr/home";
 
-// --- 公共配置 ---
-const MAX_RETRY = 1; // 刷积分时注册账号的数量 / 任务失败后的重试次数
+// --- 其他配置 ---
 const SCREEN_DIR = path.resolve(__dirname, "screenshots");
 const USER_DATA = path.resolve(__dirname, "user_data");
 const AUDIO_SOLVER = path.resolve(__dirname, "solve-audio.py");
@@ -450,6 +450,54 @@ async function clickVerify(page) {
   throw new Error("❌ 找不到按钮");
 }
 
+/* ================= 注册核验逻辑 ================= */
+
+/**
+ * 深度核验注册结果
+ * @param {Page} page Playwright Page 对象
+ */
+async function checkRegisterResult(page) {
+  console.log("🧐 正在核验注册状态...");
+  try {
+    // 同时监听跳转成功或错误提示出现
+    await Promise.race([
+      page.waitForURL(url => url.pathname.includes("/home") || url.pathname.includes("/dashboard"), { timeout: 20000 }),
+      page.waitForSelector(".is-invalid, .alert-danger, .invalid-feedback", { timeout: 20000 }),
+    ]).catch(() => { }); // 容忍超时，后续由逻辑判断
+
+    const url = page.url();
+    // 成功标志：URL 跳转到内部页面
+    if (url.includes("/home") || url.includes("/dashboard")) {
+      return { ok: true };
+    }
+
+    // 失败处理：提取错误信息
+    let reason = "URL 未跳转 (可能验证码未通过或服务器无响应)";
+    const errorSelectors = [".invalid-feedback", ".alert-danger", "span[role=\"alert\"]", ".is-invalid + span"];
+    
+    for (const sel of errorSelectors) {
+      const loc = page.locator(sel).first();
+      if (await loc.count() > 0) {
+        const text = await loc.innerText();
+        if (text && text.trim()) {
+          let msg = text.trim();
+          // 常见法语错误映射
+          if (msg.includes("déjà été pris") || msg.includes("déjà utilisé")) msg = "邮箱已占用 (Email already taken)";
+          if (msg.includes("confirmation password")) msg = "密码不匹配 (Password confirmation failed)";
+          if (msg.includes("caractères")) msg = "密码过短或格式错误 (Password format error)";
+          reason = msg;
+          break;
+        }
+      }
+    }
+
+    await saveDebug(page, "register_failed");
+    return { ok: false, reason };
+  } catch (e) {
+    return { ok: false, reason: `核验异常: ${e.message}` };
+  }
+}
+
 /* ================= 任务模块 ================= */
 
 async function taskRegister() {
@@ -480,12 +528,19 @@ async function taskRegister() {
     await humanize(page);
     await solveCaptcha(page);
     await page.evaluate(() => document.querySelector("form").submit());
-    await sleep(8000);
-    console.log("🎉 注册成功");
-    return { ok: true };
+    
+    // 执行深度校验
+    const result = await checkRegisterResult(page);
+    if (result.ok) {
+      console.log("🎉 注册成功 (已跳转至首页)");
+      return { ok: true };
+    } else {
+      console.log(`💥 注册失败: ${result.reason}`);
+      return { ok: false, reason: result.reason };
+    }
   } catch (e) {
-    console.log("💥 注册失败:", e.message);
-    return { ok: false };
+    console.log("💥 任务执行异常:", e.message);
+    return { ok: false, reason: e.message };
   } finally { if (context) await context.close(); }
 }
 
@@ -548,10 +603,24 @@ async function taskRenew(runSummary = "") {
 
   const runRegisterLoop = async () => {
     let successCount = 0;
-    for (let i = 1; i <= MAX_RETRY; i++) {
+    let attempts = 0;
+
+    // 只要成功数没达标，且总尝试次数没超过上限，就继续
+    while (successCount < SUCCESS_TARGET && attempts < MAX_RETRY) {
+      attempts++;
+      console.log(`\n🏹 正在进行第 ${attempts} 次注册尝试 (目标: ${SUCCESS_TARGET}, 当前成功: ${successCount})`);
+      
       const r = await taskRegister();
-      if (r.ok) successCount++;
-      if (i < MAX_RETRY) await sleep(4000);
+      if (r.ok) {
+        successCount++;
+        console.log(`✨ 成功注册第 ${successCount} 个账号`);
+      } else {
+        console.log(`⚠️ 第 ${attempts} 次注册尝试失败，原因: ${r.reason || "未知"}`);
+      }
+
+      if (successCount < SUCCESS_TARGET && attempts < MAX_RETRY) {
+        await sleep(5000); // 两次尝试间的间隔
+      }
     }
     return successCount;
   };
@@ -572,8 +641,6 @@ async function taskRenew(runSummary = "") {
       if (USE_WARP) await rotateIP();
     }
     await taskRenew(regSummary);
-  } else if (effectiveMode === 4) {
-    console.log("🏁 [模式 4 调试] IP 旋转测试已执行完毕，直接退出程序以节省时间。");
   } else {
     process.exit(1);
   }
