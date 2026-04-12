@@ -12,7 +12,7 @@ const USE_WARP = true;  // 是否开启 WARP (防止 IP 被禁)。开启: true, 
 // 1: 仅刷积分 (注册)
 // 2: 仅续期
 // 3: 组合模式 (续期落实，刷分由系统动态指派路径：每周仅随机执行 2 次)
-const MODE = 3;
+const MODE = 1;
 
 // --- 注册任务配置 ---
 // 邀请链接，通过此链接注册可为主账号积累积分
@@ -306,7 +306,8 @@ function genAccount() {
   const names = ["Panda", "Tiger", "Bird", "Cloud", "Shadow", "Knight", "Coder", "Gamer", "Player", "Star", "Lion", "Wolf", "Hunter", "Ace"];
   const prefix = adjs[Math.floor(Math.random() * adjs.length)];
   const suffix = names[Math.floor(Math.random() * names.length)];
-  const name = `${prefix}${suffix}_${Math.random().toString(36).slice(2, 5)}`;
+  // 核心修复：移除下划线 _，因为网站只接受字母和数字
+  const name = `${prefix}${suffix}${Math.random().toString(36).slice(2, 5)}`;
   const domains = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com"];
   const domain = domains[Math.floor(Math.random() * domains.length)];
   return {
@@ -481,10 +482,11 @@ async function checkRegisterResult(page) {
         const text = await loc.innerText();
         if (text && text.trim()) {
           let msg = text.trim();
-          // 常见法语错误映射
+          // 常见法语/英语错误映射
           if (msg.includes("déjà été pris") || msg.includes("déjà utilisé")) msg = "邮箱已占用 (Email already taken)";
           if (msg.includes("confirmation password")) msg = "密码不匹配 (Password confirmation failed)";
           if (msg.includes("caractères")) msg = "密码过短或格式错误 (Password format error)";
+          if (msg.includes("letters and numbers")) msg = "用户名格式错误 (只能包含字母和数字)";
           reason = msg;
           break;
         }
