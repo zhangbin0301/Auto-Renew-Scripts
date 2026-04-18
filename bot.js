@@ -16,7 +16,7 @@ const MODE = 3;
 
 // --- 注册任务配置 ---
 // 邀请链接，通过此链接注册可为主账号积累积分
-const REGISTER_URL = "https://manager.teoheberg.fr/register?ref=q1xCEvAK";
+const REGISTER_URL = "https://manager.teoheberg.fr/register?ref=6i9h9MmD";
 const SUCCESS_TARGET = 1; // 每日目标成功注册的账号数量
 const MAX_RETRY = 3;      // 针对单个任务（注册或续期）的最大尝试次数上限
 
@@ -25,7 +25,7 @@ const MAX_RETRY = 3;      // 针对单个任务（注册或续期）的最大尝
 const COOKIE_NAME = "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d";
 const COOKIE_VALUE =
   process.env.TEOHEBERG_REMEMBER_WEB_COOKIE ||
-  "eyJpdiI6InBHZU5sS2xDaDkwZDRub2VWNmZUdFE9PSIsInZhbHVlIjoiKzF2VS92MDFGRU5ZK0FhTjY4Q090VEVOWjJTcVVJU2xKcmtNVTJ1UkFoU0ZVU3lUejFReW1ZaUx6QkJjN1loYTZ5VmpmNDl2LzcvZFZtYmpZY2Y0WFIwSHNCZGptZm1sMSs4UmI5empRTEtZMldublk4VlAzNlIwMmdqNTBxL0lzOFJ0N0lMbk0zZzh0dzRpTFpTb052ZzB5TUFCQ0h2ZXVyNXRXODNDUHQwb2tkTEt2NEJtejFKMnQ1cE5kazB1QjlBbWtXM1JyRHFoQklMQkhGazFDL1I3WEwzTkw3Mi9EWFVyRDI3dXgrbz0iLCJtYWMiOiJiMmM3MWU1ZjAwZGY4ZDBmNjUyZTJhMTU5OTlhNDE4ZmI2ZTFjMzM4ZTcxZGM2ZmIxODI0Y2JiNGYzZmY1NDRhIiwidGFnIjoiIn0=";
+  "eyJpdiI6IkVPQ1owTkhvTVhFNGJmZHZTbmhLbFE9PSIsInZhbHVlIjoiRURTeisweHZoNXZ4elZCZnBldnpselNnRVBWZkthVmh2WGozWU9HdWdlV1BaODlPZE1kTDVhU3hLRmQwendIQWR2RXRhbWQ4dThTcCtFVVAwMVpMTEJTUnlRMVpjckVmSVJxNHJLdFpiQzNXTGgyUkxENFV2T1AvYXk5NGJSczFMbkJBRjhoSmFTWjVmNTFwYldRa2MyUEFUNm1YeDdDM0Y4cmZ5RFE1NWcvNEd0VERrdzFxYnR4Q2FkWmZZR2lQVDBYU215NTl6RlpNWWI2Sy9ROFNPa3dML2VQT2lkQ0NMbVdrbUtIRm9HND0iLCJtYWMiOiI1NTUxNTBhNTdlOWQwMTk1MjM0YzU3NzU5NTViNzNmZmVlMGY4NmYzNmNjNTEyNWUzMzBjYmNlNmJhMzY2OWMyIiwidGFnIjoiIn0=";
 
 const SERVERS_URL = "https://manager.teoheberg.fr/servers";
 const HOME_URL = "https://manager.teoheberg.fr/home";
