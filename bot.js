@@ -170,7 +170,7 @@ const Utils = {
     } else if (!rotated) {
       Logger.error("WARP 所有旋转指令均执行失败，提示: 请检查 warp-cli 是否已安装及服务是否启动");
     } else {
-      Logger.warn(`WARP 已成功重连，但出口 IP 仍为 ${newIP}，请确认 warp-cli 模式是否为 'warp' 而非 'doh'`);
+      Logger.info(`WARP 隧道已重连，出口 IP 仍为 ${newIP} (同 PoP 复用，不影响业务)`);
     }
   },
 
@@ -814,7 +814,7 @@ class TeoBot {
     const { earnStatus, initialCoins, finalCoins, renewStatus, remainingTime } = this.stats;
 
     const reportStr = [
-      "📋 Teoheberg 状况报告 ",
+      "📋 Teoheberg 状况报告 \n",
       `🪙 领币任务: ${this.stats.claimProgress} (${earnStatus})`,
       `🔄 续期执行: ${renewStatus}`,
       "────────────────────",
