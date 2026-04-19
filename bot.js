@@ -248,7 +248,10 @@ class CaptchaSolver {
           await Utils.sleep(2000);
         }
       }
-    } catch (e) { Logger.warn("Turnstile 处理异常:", e.message); }
+    } catch (e) { 
+      Logger.warn("Turnstile 处理异常:", e.message); 
+      await Utils.saveDebug(page, "turnstile_error");
+    }
   }
 
   /** 处理 reCAPTCHA (含图像识别与 Buster 插件) */
@@ -307,7 +310,10 @@ class CaptchaSolver {
         if (solved) return Logger.success("reCAPTCHA 验证通过");
         await Utils.sleep(2000);
       }
-    } catch (e) { Logger.warn("reCAPTCHA 处理失败:", e.message); }
+    } catch (e) { 
+      Logger.warn("reCAPTCHA 处理失败:", e.message); 
+      await Utils.saveDebug(page, "recaptcha_error");
+    }
   }
 }
 
@@ -383,7 +389,8 @@ class TeoBot {
           Logger.info(`尝试第 ${i} 次领币...`);
           await btn.first().click();
           
-          const getLinkBtn = page.locator("button[data-testid='lv-button'], [dusk='fullsize-get-content-btn'], button:has-text('Get Link')");
+          // --- 精准匹配 Get Link 按钮，避开侧边栏或顶栏的登录/注册按钮 ---
+          const getLinkBtn = page.locator("button:has-text('Get Link'), button:has-text('Free Access'), [dusk='fullsize-get-content-btn']").filter({ hasNotText: /Login|Register/i }).first();
           await getLinkBtn.waitFor({ state: "visible", timeout: CONFIG.timeouts.getLink }).catch(() => {});
 
           const nextEvent = this.context.waitForEvent("page", { timeout: 30000 }).catch(() => null);
@@ -415,7 +422,10 @@ class TeoBot {
           Logger.success(`第 ${i} 次领币执行成功`);
           this.stats.earnCount++;
           await Utils.sleep(3000);
-        } catch (err) { Logger.warn(`第 ${i} 次尝试失败:`, err.message); }
+        } catch (err) { 
+          Logger.warn(`第 ${i} 次尝试失败:`, err.message); 
+          await Utils.saveDebug(page, `earn_retry_${i}_error`);
+        }
       }
     } finally {
       this.context.off("page", popupKiller);
@@ -467,6 +477,7 @@ class TeoBot {
             break;
           } catch (e) {
             Logger.warn(`尝试 ${i} 失败:`, e.message);
+            await Utils.saveDebug(page, `renew_retry_${i}_error`);
             if (i === CONFIG.limits.renewRetry) this.stats.renewStatus = "⚠️ 续期最终失败";
             await page.goto(CONFIG.urls.servers);
           }
