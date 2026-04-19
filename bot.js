@@ -5,6 +5,14 @@ const { execSync } = require("child_process");
 const { chromium } = require("playwright");
 const axios = require("axios");
 
+// --- CI 兼容性标记 (供 GitHub Actions 解析) ---
+/**
+ * IP 旋转总开关
+ * true:  开启。GitHub Actions 会自动安装并运行 WARP 服务，脚本会执行 IP 切换。
+ * false: 关闭。不启动 WARP，使用原始 IP 运行 (适合本地调试)。
+ */
+const USE_WARP = true;
+
 /**
  * ============================================================================
  * 1. CONFIG - 统一配置中心
@@ -12,18 +20,13 @@ const axios = require("axios");
  */
 const CONFIG = {
   // --- 功能开关 ---
-  /** 
-   * 是否开启 Cloudflare WARP IP 切换功能 (防止 IP 被 Teoheberg 或 Linkvertise 封禁)。
-   * 开启 (true): 在启动时及必要时通过 warp-cli 自动切换公网 IP。
-   * 关闭 (false): 使用当前网络 IP 运行。
-   */
-  useWarp: true,
+  useWarp: USE_WARP,  // 引用上面的标记
 
   // 认证配置 (环境变量优先，保留硬编码兜底)
   auth: {
     cookieName: "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d",
-    cookieValue: process.env.TEOHEBERG_REMEMBER_WEB_COOKIE || 
-                 "eyJpdiI6IkxWdmlqT2FpVnpJMXE4Nys0Q3QxU1E9PSIsInZhbHVlIjoid2w3VWgrNUFvWnRtYkxITHBqYXlHM2kwdVdJSWJVWExydmNJRndpWXdpVnJVc2RBZ0pQem1LdVFiS1VpTWsrM0RnOGRxUXFvQlllYXJCRExPRkVoZXZXRTQxbC9YV0FUVTh6NjJiUFkrbnJHSTNpMEhVcmRvZTl2YlZPYkY2d1V3SERaTFIvL1JBZHR2dzVzSnM3MEprSEIwSWFqSEJhalR3MlNVZEx4Zy9ZeDlscHcrOXlOc2RObHdGNGVMd1pvNUF4a1hvWnhOcU91eFRPS3lhSVdBbUZnNDNFWVU5eUsxVjdPRFBpTllLYz0iLCJtYWMiOiIxODRhNjVmMjg4NmJjNTI2MGE2ZmJkMWQxN2M3NTYxNDAyM2Q1ODgzYjZjNGVhOTllYTg4NDA0NWJjNGRlOTI3IiwidGFnIjoiIn0%3D",
+    cookieValue: process.env.TEOHEBERG_REMEMBER_WEB_COOKIE ||
+      "eyJpdiI6IkxWdmlqT2FpVnpJMXE4Nys0Q3QxU1E9PSIsInZhbHVlIjoid2w3VWgrNUFvWnRtYkxITHBqYXlHM2kwdVdJSWJVWExydmNJRndpWXdpVnJVc2RBZ0pQem1LdVFiS1VpTWsrM0RnOGRxUXFvQlllYXJCRExPRkVoZXZXRTQxbC9YV0FUVTh6NjJiUFkrbnJHSTNpMEhVcmRvZTl2YlZPYkY2d1V3SERaTFIvL1JBZHR2dzVzSnM3MEprSEIwSWFqSEJhalR3MlNVZEx4Zy9ZeDlscHcrOXlOc2RObHdGNGVMd1pvNUF4a1hvWnhOcU91eFRPS3lhSVdBbUZnNDNFWVU5eUsxVjdPRFBpTllLYz0iLCJtYWMiOiIxODRhNjVmMjg4NmJjNTI2MGE2ZmJkMWQxN2M3NTYxNDAyM2Q1ODgzYjZjNGVhOTllYTg4NDA0NWJjNGRlOTI3IiwidGFnIjoiIn0%3D",
   },
 
   // --- 业务 URL 列表 ---
@@ -37,7 +40,7 @@ const CONFIG = {
 
   // 任务限制与重试
   limits: {
-    earnAttempts: 2,        // 领金币最大探测次数 (确保领满)
+    earnAttempts: 1,        // 领金币最大探测次数 (确保领满)
     renewRetry: 3,         // 续期任务最大尝试次数
   },
 
@@ -51,10 +54,10 @@ const CONFIG = {
 
   // 弹窗捕获白名单
   allowedDomains: [
-    "teoheberg.fr", 
-    "linkvertise.com", 
-    "direct-link.net", 
-    "link-to.net", 
+    "teoheberg.fr",
+    "linkvertise.com",
+    "direct-link.net",
+    "link-to.net",
     "bypass.city"
   ],
 
@@ -83,7 +86,7 @@ class Logger {
     const ts = new Date().toLocaleString("zh-CN", { hour12: false });
     console.log(`[${ts}] ${emoji} `, ...args);
   }
-  static info(msg) { Logger._log("ℹ️", `[INFO] ${msg}`); }
+  static info(msg) { Logger._log("💠", `[INFO] ${msg}`); }
   static success(msg) { Logger._log("✅", `[OK] ${msg}`); }
   static warn(msg) { Logger._log("⚠️", `[WARN] ${msg}`); }
   static error(msg) { Logger._log("❌", `[ERROR] ${msg}`); }
@@ -134,27 +137,43 @@ const Utils = {
     if (!CONFIG.useWarp) return;
     const oldIP = await Utils.getCurrentIP();
     Logger.info(`正在尝试旋转出口 IP (当前: ${oldIP})...`);
-    
-    // Windows 平台直接使用 warp-cli；Linux 平台尝试普通及 sudo 模式，并自动接受服务条款
+
     const isWin = process.platform === "win32";
     const commands = isWin ? ["warp-cli"] : ["warp-cli --accept-tos", "sudo warp-cli --accept-tos"];
-    
+
+    let rotated = false;
     for (const cmd of commands) {
       try {
-        Logger.step("强制注销并注销当前 WARP 身份");
-        execSync(`${cmd} registration new`, { stdio: "ignore" }).catch(() => {}); 
+        Logger.step(`尝试指令: ${cmd}`);
+
+        Logger.step("断开当前连接并清除状态");
+        execSync(`${cmd} disconnect`, { stdio: "pipe" });
         await Utils.sleep(2000);
-        Logger.step("断开当前残留连接");
-        execSync(`${cmd} disconnect`, { stdio: "ignore" });
-        await Utils.sleep(3000);
-        Logger.step("建立全新 WARP 隧道 (获取新 IP)");
-        execSync(`${cmd} connect`, { stdio: "ignore" });
-        await Utils.sleep(10000); // 增加等待时间，确保路由表更新
+
+        Logger.step("申请全新的 WARP 注册身份 (Registration New)");
+        execSync(`${cmd} registration new`, { stdio: "pipe" });
+        await Utils.sleep(2000);
+
+        Logger.step("重新建立隧道并获取新 IP");
+        execSync(`${cmd} connect`, { stdio: "pipe" });
+        await Utils.sleep(12000);
+
+        rotated = true;
         break;
-      } catch {}
+      } catch (e) {
+        const errorMsg = e.stderr ? e.stderr.toString().trim() : e.message;
+        Logger.warn(`指令执行受阻: ${errorMsg}`);
+      }
     }
+
     const newIP = await Utils.getCurrentIP();
-    Logger.success(`出口 IP 确认成功: ${oldIP} -> ${newIP}`);
+    if (newIP !== oldIP && oldIP !== "未知") {
+      Logger.success(`出口 IP 旋转成功: ${oldIP} -> ${newIP}`);
+    } else if (!rotated) {
+      Logger.error("WARP 所有旋转指令均执行失败，提示: 请检查 warp-cli 是否已安装及服务是否启动");
+    } else {
+      Logger.warn(`WARP 已成功重连，但出口 IP 仍为 ${newIP}，请确认 warp-cli 模式是否为 'warp' 而非 'doh'`);
+    }
   },
 
   async sendTelegram(text) {
@@ -175,7 +194,7 @@ const Utils = {
       if (!fs.existsSync(CONFIG.paths.screenshots)) fs.mkdirSync(CONFIG.paths.screenshots, { recursive: true });
       await page.screenshot({ path: path.join(CONFIG.paths.screenshots, `${ts}_${name}.png`), fullPage: true });
       Logger.debug(`已抓拍第一现场并保存至 screenshots: ${name}`);
-    } catch {}
+    } catch { }
   },
 
   async humanize(page) {
@@ -234,34 +253,28 @@ class BrowserManager {
 class CaptchaSolver {
   /** 处理 Cloudflare Turnstile (核心坐标点击法) */
   static async solveTurnstile(page) {
-    Logger.info("检测 Cloudflare Turnstile 组件进度...");
-    const iframeSelector = "iframe[src*='challenges.cloudflare.com']";
+    Logger.info("正在执行验证码扫描序列 (Turnstile/Hcaptcha)...");
+    const iframeSelector = "iframe[src*='challenges.cloudflare.com'], iframe[src*='hcaptcha.com'], div.cf-turnstile iframe";
     try {
-      const iframe = await page.waitForSelector(iframeSelector, { timeout: 15000 }).catch(() => null);
-      if (!iframe) return Logger.debug("当前环境未发现 Turnstile 挑战，直接跳过");
-
-      Logger.step("解析坐标并执行点击突破策略");
-      await Utils.sleep(3000);
-      for (let i = 0; i < 5; i++) {
-        const box = await iframe.boundingBox();
-        if (!box) { await Utils.sleep(1000); continue; }
-
-        Logger.mouse(`尝试 Turnstile 坐标点击突破 (${i + 1}/5)`);
-        await page.mouse.click(box.x + 30, box.y + box.height / 2);
-
-        for (let j = 0; j < 6; j++) {
-          const solved = await page.evaluate(() => {
-            const input = document.querySelector("input[name='cf-turnstile-response']");
-            return input && input.value.length > 0;
-          });
-          if (solved) return Logger.success("Cloudflare Turnstile 验证通过!");
-          if (!await page.$(iframeSelector)) return Logger.success("Turnstile 组件已在交互后消失");
-          await Utils.sleep(2000);
-        }
+      const iframe = await page.waitForSelector(iframeSelector, { timeout: 10000 }).catch(() => null);
+      if (!iframe) {
+        const maybeChallenge = await page.locator("div:has(iframe), #turnstile-widget").filter({ visible: true }).first().count();
+        if (maybeChallenge === 0) return Logger.debug("🔍 未探测到活跃的验证组件，跳过解盾阶段");
+        Logger.info("⚠️ 探测到疑似验证组件容器，尝试暴力解析...");
       }
-    } catch (e) { 
-      Logger.warn("Turnstile 处理出现异常中断: " + e.message); 
-      await Utils.saveDebug(page, "turnstile_error");
+
+      await Utils.sleep(2000);
+      const targets = await page.$$(iframeSelector);
+      for (const target of targets) {
+        const box = await target.boundingBox();
+        if (!box) continue;
+        Logger.mouse(`尝试执行物理坐标点击辅助 (目标: ${Math.round(box.x)}, ${Math.round(box.y)})`);
+        await page.mouse.click(box.x + 30, box.y + box.height / 2);
+        await Utils.sleep(3000);
+      }
+      Logger.success("验证码突破序列执行完毕");
+    } catch (e) {
+      Logger.warn("验证码识别过程遇到干扰: " + e.message);
     }
   }
 
@@ -279,7 +292,7 @@ class CaptchaSolver {
       if (bframeEl) {
         const bframe = await bframeEl.contentFrame();
         Logger.info("检测到图像挑战卡片，尝试提取音频特征...");
-        
+
         if (fs.existsSync(CONFIG.paths.buster)) {
           Logger.shield("发现 Buster 插件，正在启动自动化破解序列...");
           const reload = bframe.locator("#recaptcha-reload-button");
@@ -312,7 +325,7 @@ class CaptchaSolver {
           }
         }
       }
-      
+
       // 轮询直到验证成功
       for (let i = 0; i < 60; i++) {
         const solved = await page.evaluate(() => {
@@ -322,8 +335,8 @@ class CaptchaSolver {
         if (solved) return Logger.success("reCAPTCHA 验证挑战解析成功!");
         await Utils.sleep(2000);
       }
-    } catch (e) { 
-      Logger.warn("reCAPTCHA 破解流程失败: " + e.message); 
+    } catch (e) {
+      Logger.warn("reCAPTCHA 破解流程失败: " + e.message);
       await Utils.saveDebug(page, "recaptcha_error");
     }
   }
@@ -337,7 +350,7 @@ class CaptchaSolver {
 class TeoBot {
   constructor(context) {
     this.context = context;
-    this.stats = { earnCount: 0, initialCoins: "0.00", finalCoins: "0.00", renewStatus: "ℹ️ 未达阈值", remainingTime: "未知" };
+    this.stats = { earnCount: 0, initialCoins: "0.00", finalCoins: "0.00", renewStatus: "💠 未达阈值", remainingTime: "未知" };
   }
 
   /** 获取实时金币余额 */
@@ -371,7 +384,7 @@ class TeoBot {
   async earn() {
     Logger.coin("启动每日 Free Credits 领取任务...");
     const page = await this.context.newPage();
-    
+
     const popupKiller = (p) => {
       setTimeout(async () => {
         try {
@@ -379,9 +392,9 @@ class TeoBot {
           const allowed = CONFIG.allowedDomains.some(d => url.includes(d));
           if (!allowed && url !== "about:blank") {
             Logger.shield(`拦截并秒杀非预期广告弹窗: ${url.slice(0, 40)}...`);
-            await p.close().catch(() => {});
+            await p.close().catch(() => { });
           }
-        } catch {}
+        } catch { }
       }, 1000);
     };
     this.context.on("page", popupKiller);
@@ -402,23 +415,23 @@ class TeoBot {
           Logger.info(`开始执行第 ${i} 次领金币序列...`);
           Logger.mouse(`点击 [Commencer maintenant] 生成按钮`);
           await btn.first().click();
-          
+
           Logger.step("等待 Linkvertise 动态内容渲染");
           // --- 精准匹配 Get Link 按钮，避开侧边栏或顶栏的登录/注册按钮 ---
           const getLinkBtn = page.locator("button:has-text('Get Link'), button:has-text('Free Access'), [dusk='fullsize-get-content-btn']").filter({ hasNotText: /Login|Register/i }).first();
-          await getLinkBtn.waitFor({ state: "visible", timeout: CONFIG.timeouts.getLink }).catch(() => {});
+          await getLinkBtn.waitFor({ state: "visible", timeout: CONFIG.timeouts.getLink }).catch(() => { });
 
           // --- 增强版弹窗拦截 (涵盖 AGREE, ACCEPT, CONFIRM, OK 等) ---
           const lvConsent = page.locator("#qc-cmp2-container button, .qc-cmp2-container button, button:has-text('AGREE'), button:has-text('ACCEPT'), button:has-text('CONFIRM'), button:has-text('OK')").filter({ visible: true });
           if (await lvConsent.count() > 0) {
             Logger.shield("正在自动清理 Linkvertise 隐私协议确认弹窗...");
-            await lvConsent.first().click().catch(() => {});
+            await lvConsent.first().click().catch(() => { });
             await Utils.sleep(1000);
 
             // 再次检查是否还有残留的 OK 按钮 (针对部分区域的二次弹窗)
             const secondOk = page.locator("button:has-text('OK')").filter({ visible: true });
             if (await secondOk.count() > 0) {
-              await secondOk.first().click().catch(() => {});
+              await secondOk.first().click().catch(() => { });
               await Utils.sleep(1000);
             }
           }
@@ -432,20 +445,29 @@ class TeoBot {
             Logger.mouse("点击 [Get Link] 按钮 (启用了强制属性穿透策略)...");
             await getLinkBtn.click({ force: true });
           }
-          
+
           const adPage = await nextEvent;
-          if (!adPage) {
-            await Utils.saveDebug(page, `earn_retry_${i}_no_jump`);
-            throw new Error("点击后未产生目标页面跳转，跳转逻辑可能已被拦截");
+          let adUrl = "";
+
+          if (adPage) {
+            await adPage.waitForLoadState("domcontentloaded");
+            adUrl = adPage.url();
+            await adPage.close();
+          } else {
+            // --- 核心改进：处理“原地跳转”的 Paywall 页面 ---
+            const currentUrl = page.url();
+            if (currentUrl.includes("linkvertise.com") && !currentUrl.includes("/generate")) {
+              Logger.info("探测到原地跳转 (Paywall/倒计时页面)，尝试直接 Bypass 当前 URL...");
+              adUrl = currentUrl;
+            } else {
+              await Utils.saveDebug(page, `earn_retry_${i}_no_jump`);
+              throw new Error("点击后未产生页面跳转，且当前页面不符合 Bypass 特征");
+            }
           }
 
-          await adPage.waitForLoadState("domcontentloaded");
-          const adUrl = adPage.url();
-          await adPage.close();
-
-          // 判定 1: 确保抓到的是有效的广告链接，而不是原地踏步
-          if (adUrl.includes("linkvertise.com") && !adUrl.includes("dynamic")) {
-            throw new Error("抓取到的目标链接仍为 Linkvertise 域名，出现原地循环");
+          // 判定 1: 确保抓到的是有效的链接
+          if (!adUrl || (adUrl.includes("linkvertise.com") && adUrl.includes("/generate"))) {
+            throw new Error("抓取到的链接无效或跳转未完成");
           }
           Logger.success(`已成功捕获目标链接: ${adUrl.slice(0, 50)}...`);
 
@@ -454,21 +476,21 @@ class TeoBot {
           Logger.info(`正在填入 Linkvertise 原始链接并提交`);
           await page.fill("input[placeholder*='enter a link']", adUrl);
           await Utils.sleep(1000);
-          
+
           Logger.mouse("触发 [Bypass Link!] 处理引擎...");
           await page.click("a#bypass-button", { force: true });
           await page.waitForURL(u => u.href.includes("/bypass?bypass="), { timeout: 10000 }).catch(async () => {
             Logger.warn("处理引擎未及时反馈跳转，尝试补位点击...");
-            await page.click("a#bypass-button", { force: true }).catch(() => {});
-            await page.waitForURL(u => u.href.includes("/bypass?bypass="), { timeout: 10000 }).catch(() => {});
+            await page.click("a#bypass-button", { force: true }).catch(() => { });
+            await page.waitForURL(u => u.href.includes("/bypass?bypass="), { timeout: 10000 }).catch(() => { });
           });
 
           await CaptchaSolver.solveTurnstile(page);
-          
+
           const openLink = page.locator("a:has-text('Open bypassed Link')");
           Logger.step("等待 Bypass 回调结果产出");
           await openLink.waitFor({ state: "visible", timeout: CONFIG.timeouts.bypassResult });
-          
+
           Logger.mouse("点击 [Open bypassed Link] 返回 TeoHeberg 进行验证");
           await openLink.click();
 
@@ -481,10 +503,10 @@ class TeoBot {
             await Utils.saveDebug(page, `earn_retry_${i}_return_fail`);
             throw new Error("未能成功返回 Teoheberg 目标网页，本轮金币可能无效");
           }
-          
+
           await Utils.sleep(3000);
-        } catch (err) { 
-          Logger.warn(`第 ${i} 轮任务异常异常中断: ${err.message}`); 
+        } catch (err) {
+          Logger.warn(`第 ${i} 轮任务异常异常中断: ${err.message}`);
           await Utils.saveDebug(page, `earn_retry_${i}_error`);
         }
       }
@@ -517,33 +539,33 @@ class TeoBot {
 
       if (!need) {
         Logger.info(`判定结论: 时间充足，无需消耗金币进行冗余续期`);
-        this.stats.renewStatus = "ℹ️ 未达触发阈值";
+        this.stats.renewStatus = "💠 未达触发阈值";
       } else {
         Logger.warn("判定结论: 剩余耐耗不足，立即启动自动续期任务!");
         for (let i = 1; i <= CONFIG.limits.renewRetry; i++) {
           try {
             Logger.step(`正在执行第 ${i} 次续期尝试信号`);
             const btn = page.locator("a.btn-success:has-text('Renew')");
-            if (!await btn.count()) { 
+            if (!await btn.count()) {
               Logger.success("Renew 按钮已由于并发操作消失，判定为续期成功");
-              this.stats.renewStatus = "✅ 已提前或由其它方式续期"; 
-              break; 
+              this.stats.renewStatus = "✅ 已提前或由其它方式续期";
+              break;
             }
-            
+
             await Utils.humanize(page);
             Logger.mouse("触发 [Renew] 续期按钮...");
             await btn.first().click();
             await Utils.sleep(5000);
-            
+
             if (await page.locator('iframe[src*="recaptcha"]').count()) {
               await CaptchaSolver.solveRecaptcha(page, this.context);
             }
-            
+
             const submit = page.locator("button:has-text('Verify'), button[type='submit']").first();
             Logger.mouse("点击 [Verify] 完成最终续期确认...");
             await submit.click();
             await Utils.sleep(8000);
-            
+
             this.stats.renewStatus = "✅ 自动续期成功";
             Logger.success("服务器耐耗已成功充值 24 小时!");
             break;
@@ -555,7 +577,7 @@ class TeoBot {
           }
         }
       }
-      
+
       await page.goto(CONFIG.urls.home);
       this.stats.finalCoins = await this.fetchCoins(page);
       Logger.coin(`任务后账户可用余额: ${this.stats.finalCoins} Credits`);
@@ -578,7 +600,7 @@ class TeoBot {
       `💡 剩余耐用: ${remainingTime}`,
       `🕐 执行时间: ${Utils.getBeijingTime()}`,
     ].join("\n");
-    
+
     console.log("\n" + reportStr + "\n");
     await Utils.sendTelegram(reportStr);
   }
@@ -605,7 +627,7 @@ async function main() {
     Logger.error("系统引擎核心抛出致命异常: " + e.message);
   } finally {
     Logger.info("执行序列结束，正在关闭引擎并清理环境...");
-    await context.close().catch(() => {});
+    await context.close().catch(() => { });
   }
   process.exit(0);
 }
