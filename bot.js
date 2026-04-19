@@ -5,12 +5,6 @@ const { execSync, execFileSync } = require("child_process");
 const { chromium } = require("playwright");
 const axios = require("axios");
 
-// --- CI 兼容性标记 (供 GitHub Actions 解析) ---
-/**
- * IP 旋转总开关
- * true:  开启。GitHub Actions 会自动安装并运行 WARP 服务，脚本会执行 IP 切换。
- * false: 关闭。不启动 WARP，使用原始 IP 运行 (适合本地调试)。
- */
 const USE_WARP_CONFIG = true; // [控制台开关] true: 开启 WARP / false: 关闭
 const USE_WARP = process.env.ENABLE_WARP !== undefined ? process.env.ENABLE_WARP === 'true' : USE_WARP_CONFIG;
 
@@ -844,7 +838,7 @@ class TeoBot {
  * ============================================================================
  */
 async function main() {
-  console.log(`\n🚀 Teoheberg Bot [INDUSTRIAL ENGINE v2.0] 启动序列开始...\n`);
+  console.log(`\n🚀 Teoheberg Bot 启动序列开始...\n`);
 
   // 环境预检
   await Utils.checkDependencies();
