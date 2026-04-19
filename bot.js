@@ -40,8 +40,8 @@ const CONFIG = {
 
   // 任务限制与重试
   limits: {
-    earnAttempts: 1,        // 领金币最大探测次数 (确保领满)
-    renewRetry: 1,         // 续期任务最大尝试次数
+    earnAttempts: 5,        // 领金币最大探测次数
+    renewRetry: 3,         // 续期任务最大尝试次数
   },
 
   // 超时配置 (单位: ms)
@@ -150,13 +150,17 @@ const Utils = {
         execSync(`${cmd} disconnect`, { stdio: "pipe" });
         await Utils.sleep(2000);
 
+        Logger.step("注销并清除旧的注册身份 (Registration Delete)");
+        try { execSync(`${cmd} registration delete`, { stdio: "pipe" }); } catch { /* 忽略已删除的情况 */ }
+        await Utils.sleep(2000);
+
         Logger.step("申请全新的 WARP 注册身份 (Registration New)");
         execSync(`${cmd} registration new`, { stdio: "pipe" });
         await Utils.sleep(2000);
 
         Logger.step("重新建立隧道并获取新 IP");
         execSync(`${cmd} connect`, { stdio: "pipe" });
-        await Utils.sleep(12000);
+        await Utils.sleep(15000); // 增加到 15 秒确保链路完全打通
 
         rotated = true;
         break;
@@ -253,25 +257,71 @@ class BrowserManager {
 class CaptchaSolver {
   /** 处理 Cloudflare Turnstile (核心坐标点击法) */
   static async solveTurnstile(page) {
-    Logger.info("正在执行验证码扫描序列 (Turnstile/Hcaptcha)...");
-    const iframeSelector = "iframe[src*='challenges.cloudflare.com'], iframe[src*='hcaptcha.com'], div.cf-turnstile iframe";
+    Logger.info("正在执行验证码扫描序列 (全链路扫描模式)...");
+    
     try {
-      const iframe = await page.waitForSelector(iframeSelector, { timeout: 10000 }).catch(() => null);
-      if (!iframe) {
-        const maybeChallenge = await page.locator("div:has(iframe), #turnstile-widget").filter({ visible: true }).first().count();
-        if (maybeChallenge === 0) return Logger.debug("🔍 未探测到活跃的验证组件，跳过解盾阶段");
-        Logger.info("⚠️ 探测到疑似验证组件容器，尝试暴力解析...");
+      // 1. 升级版选择器：直接瞄准主 DOM 中的外部容器，无视 closed shadow root
+      const standardSelector = "div#cf-turnstile, .cf-turnstile, iframe[src*='challenges.cloudflare'], iframe[src*='hcaptcha']";
+      await page.waitForSelector(standardSelector, { state: "attached", timeout: 10000 }).catch(() => null);
+      await Utils.sleep(2000); 
+
+      let targets = await page.$$(standardSelector);
+      
+      // 添加诊断打印
+      if (targets.length === 0) {
+        Logger.debug("标准扫描未击中，开始执行全页 iframe X光透视...");
+        const allIframes = await page.$$("iframe");
+        for (const [idx, frame] of allIframes.entries()) {
+          const box = await frame.boundingBox().catch(() => null);
+          const src = await frame.getAttribute("src").catch(() => "unknown") || "";
+          Logger.debug(`透视分析 Iframe[${idx}]: size=${box ? Math.round(box.width) + 'x' + Math.round(box.height) : 'null'}, src=${src.slice(0, 45)}`);
+          if (box && box.width > 280 && box.height > 60) {
+            targets.push(frame); // 只要够大就认为是验证码
+          }
+        }
       }
 
-      await Utils.sleep(2000);
-      const targets = await page.$$(iframeSelector);
-      for (const target of targets) {
-        const box = await target.boundingBox();
-        if (!box) continue;
-        Logger.mouse(`尝试执行物理坐标点击辅助 (目标: ${Math.round(box.x)}, ${Math.round(box.y)})`);
-        await page.mouse.click(box.x + 30, box.y + box.height / 2);
-        await Utils.sleep(3000);
+      if (targets.length === 0) {
+        Logger.debug("🔍 全链路透视未发现明确验证组件");
+        if (page.url().includes("bypass.city")) {
+          Logger.shield("启动 bypass.city 专属终极盲狙策略 (屏幕中心左偏移 125px)");
+          const vp = page.viewportSize();
+          if (vp) {
+            await page.mouse.click(vp.width / 2 - 125, vp.height / 2);
+            await Utils.sleep(4000);
+            return Logger.success("盲狙策略执行完毕");
+          }
+        }
+        return;
       }
+
+      Logger.step("解析坐标并注入物理点击流");
+      for (const target of targets) {
+        await target.scrollIntoViewIfNeeded().catch(() => {});
+        let box = await target.boundingBox();
+        if (!box) continue;
+
+        let targetX = box.x + 40;
+        let targetY = box.y + box.height / 2;
+
+        // 【重磅纠偏】应对 bypass.city 布局引擎欺骗
+        // 日志显示 boundingBox 在此页面报出的 Y 轴坐标为 368，但实际视觉中心点在 550 左右。
+        // 既然页面强行视觉垂直居中，我们就用数学强制纠偏。
+        if (page.url().includes("bypass.city")) {
+           const vp = page.viewportSize();
+           if (vp) {
+             Logger.debug(`探测到坐标系漂移，启用绝对屏幕中心校准... (视口: ${vp.height})`);
+             // 绝对屏幕中心，向左偏移 110 像素
+             targetX = vp.width / 2 - 110; 
+             targetY = vp.height / 2;
+           }
+        }
+
+        Logger.mouse(`执行物理点击辅助 (坐标: ${Math.round(targetX)}, ${Math.round(targetY)})`);
+        await page.mouse.click(targetX, targetY);
+        await Utils.sleep(4000);
+      }
+      
       Logger.success("验证码突破序列执行完毕");
     } catch (e) {
       Logger.warn("验证码识别过程遇到干扰: " + e.message);
@@ -473,6 +523,15 @@ class TeoBot {
 
           Logger.step("导航至 bypass.city 执行解链任务");
           await page.goto(CONFIG.urls.bypass, { waitUntil: "networkidle" });
+
+          // --- 补位：清理 bypass.city 可能存在的 Cookie 同意弹窗/遮挡 ---
+          const bypassOk = page.locator("button:has-text('Okay'), button:has-text('OK'), .btn-primary:has-text('Accept')").filter({ visible: true });
+          if (await bypassOk.count() > 0) {
+            Logger.shield("清理 bypass.city 站内干扰弹窗...");
+            await bypassOk.first().click().catch(() => { });
+            await Utils.sleep(1000);
+          }
+
           Logger.info(`正在填入 Linkvertise 原始链接并提交`);
           await page.fill("input[placeholder*='enter a link']", adUrl);
           await Utils.sleep(1000);
