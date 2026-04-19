@@ -817,7 +817,7 @@ class TeoBot {
       "📋 Teoheberg 状况报告 ",
       `🪙 领币任务: ${this.stats.claimProgress} (${earnStatus})`,
       `🔄 续期执行: ${renewStatus}`,
-      "─────────────────────────",
+      "────────────────────",
       `💵 最初余额: ${initialCoins} Credits`,
       `🏦 当前余额: ${finalCoins} Credits`,
       `⏳ 剩余时间: ${remainingTime}`,
