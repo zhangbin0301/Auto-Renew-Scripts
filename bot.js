@@ -298,10 +298,11 @@ class CaptchaSolver {
       if (targets.length === 0) {
         Logger.debug("🔍 全链路透视未发现明确验证组件");
         if (page.url().includes("bypass.city")) {
-          Logger.shield("启动 bypass.city 专属终极盲狙策略 (屏幕中心左偏移 110px)");
+          Logger.shield("启动 bypass.city 盲狙策略 (估算上中位置 ~33% 高度)");
           const vp = page.viewportSize();
           if (vp) {
-            await page.mouse.click(vp.width / 2 - 110, vp.height / 2);
+            // 当前布局：checkbox 约在视口 y=33%、x=中心左偏 ~135
+            await page.mouse.click(vp.width / 2 - 135, vp.height * 0.33);
             await Utils.sleep(4000);
             return Logger.success("盲狙策略执行完毕");
           }
@@ -315,23 +316,11 @@ class CaptchaSolver {
         let box = await target.boundingBox();
         if (!box) continue;
 
-        let targetX = box.x + 40;
-        let targetY = box.y + box.height / 2;
+        // 直接信任 iframe 的真实 boundingBox（复选框靠左 ~40px，垂直居中）
+        const targetX = box.x + 40;
+        const targetY = box.y + box.height / 2;
 
-        // 【重磅纠偏】应对 bypass.city 布局引擎欺骗
-        // 日志显示 boundingBox 在此页面报出的 Y 轴坐标为 368，但实际视觉中心点在 550 左右。
-        // 既然页面强行视觉垂直居中，我们就用数学强制纠偏。
-        if (page.url().includes("bypass.city")) {
-          const vp = page.viewportSize();
-          if (vp) {
-            Logger.debug(`探测到坐标系漂移，启用绝对屏幕中心校准... (视口: ${vp.height})`);
-            // 绝对屏幕中心，向左偏移 110 像素
-            targetX = vp.width / 2 - 110;
-            targetY = vp.height / 2;
-          }
-        }
-
-        Logger.mouse(`执行物理点击辅助 (坐标: ${Math.round(targetX)}, ${Math.round(targetY)})`);
+        Logger.mouse(`执行物理点击辅助 (坐标: ${Math.round(targetX)}, ${Math.round(targetY)}, box=${Math.round(box.width)}x${Math.round(box.height)}@${Math.round(box.x)},${Math.round(box.y)})`);
         await page.mouse.click(targetX, targetY);
         await Utils.sleep(4000);
       }
@@ -368,7 +357,7 @@ class CaptchaSolver {
         Logger.info(`执行音频识别序列 (尝试 ${attempt}/3)...`);
 
         // 点击进入音频模式
-        await bframe.click("#recaptcha-audio-button").catch(() => {});
+        await bframe.click("#recaptcha-audio-button").catch(() => { });
         await Utils.sleep(3000);
 
         // 检查是否受限（IP 被封）
@@ -425,7 +414,7 @@ class CaptchaSolver {
 
         // 如果走到这里没 return，说明本轮失败，点击刷新
         Logger.info("点击刷新验证码...");
-        await bframe.click("#recaptcha-reload-button").catch(() => {});
+        await bframe.click("#recaptcha-reload-button").catch(() => { });
         await Utils.sleep(3000);
       }
 
@@ -817,7 +806,7 @@ class TeoBot {
       "📋 Teoheberg 状况报告 \n",
       `🪙 领币任务: ${this.stats.claimProgress} (${earnStatus})`,
       `🔄 续期执行: ${renewStatus}`,
-      "──────────────",
+      "────────────────",
       `💵 最初余额: ${initialCoins} Credits`,
       `🏦 当前余额: ${finalCoins} Credits`,
       `⏳ 剩余时间: ${remainingTime}`,
