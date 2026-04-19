@@ -40,8 +40,8 @@ const CONFIG = {
 
   // 任务限制与重试
   limits: {
-    earnAttempts: 5,        // 领金币最大探测次数
-    renewRetry: 3,         // 续期任务最大尝试次数
+    earnAttempts: 3,        // 领金币最大探测次数
+    renewRetry: 2,         // 续期任务最大尝试次数
   },
 
   // 超时配置 (单位: ms)
@@ -258,15 +258,15 @@ class CaptchaSolver {
   /** 处理 Cloudflare Turnstile (核心坐标点击法) */
   static async solveTurnstile(page) {
     Logger.info("正在执行验证码扫描序列 (全链路扫描模式)...");
-    
+
     try {
       // 1. 升级版选择器：直接瞄准主 DOM 中的外部容器，无视 closed shadow root
       const standardSelector = "div#cf-turnstile, .cf-turnstile, iframe[src*='challenges.cloudflare'], iframe[src*='hcaptcha']";
       await page.waitForSelector(standardSelector, { state: "attached", timeout: 10000 }).catch(() => null);
-      await Utils.sleep(2000); 
+      await Utils.sleep(2000);
 
       let targets = await page.$$(standardSelector);
-      
+
       // 添加诊断打印
       if (targets.length === 0) {
         Logger.debug("标准扫描未击中，开始执行全页 iframe X光透视...");
@@ -297,7 +297,7 @@ class CaptchaSolver {
 
       Logger.step("解析坐标并注入物理点击流");
       for (const target of targets) {
-        await target.scrollIntoViewIfNeeded().catch(() => {});
+        await target.scrollIntoViewIfNeeded().catch(() => { });
         let box = await target.boundingBox();
         if (!box) continue;
 
@@ -308,20 +308,20 @@ class CaptchaSolver {
         // 日志显示 boundingBox 在此页面报出的 Y 轴坐标为 368，但实际视觉中心点在 550 左右。
         // 既然页面强行视觉垂直居中，我们就用数学强制纠偏。
         if (page.url().includes("bypass.city")) {
-           const vp = page.viewportSize();
-           if (vp) {
-             Logger.debug(`探测到坐标系漂移，启用绝对屏幕中心校准... (视口: ${vp.height})`);
-             // 绝对屏幕中心，向左偏移 110 像素
-             targetX = vp.width / 2 - 110; 
-             targetY = vp.height / 2;
-           }
+          const vp = page.viewportSize();
+          if (vp) {
+            Logger.debug(`探测到坐标系漂移，启用绝对屏幕中心校准... (视口: ${vp.height})`);
+            // 绝对屏幕中心，向左偏移 110 像素
+            targetX = vp.width / 2 - 110;
+            targetY = vp.height / 2;
+          }
         }
 
         Logger.mouse(`执行物理点击辅助 (坐标: ${Math.round(targetX)}, ${Math.round(targetY)})`);
         await page.mouse.click(targetX, targetY);
         await Utils.sleep(4000);
       }
-      
+
       Logger.success("验证码突破序列执行完毕");
     } catch (e) {
       Logger.warn("验证码识别过程遇到干扰: " + e.message);
@@ -394,6 +394,57 @@ class CaptchaSolver {
 
 /**
  * ============================================================================
+ * 5.1 Linkvertise Ads Solver - 补位广告处理器
+ * ============================================================================
+ */
+class LinkvertiseAds {
+  static async handleAds(page) {
+    Logger.shield("启动 Linkvertise 原生广告识别与跳过序列...");
+    try {
+      // 1. 寻找 "Watch Ads" 或 "Free Access" 按钮
+      const watchAdsBtn = page.locator("button:has-text('Watch Ads'), button:has-text('Free Access with Ads')").filter({ visible: true });
+      if (await watchAdsBtn.count() > 0) {
+        Logger.mouse("探测到广告任务入口，开始执行模拟观看流程...");
+        await watchAdsBtn.first().click().catch(() => { });
+        await Utils.sleep(2000);
+      }
+
+      // 2. 三连 Skip 逻辑
+      for (let step = 1; step <= 3; step++) {
+        Logger.step(`等待第 ${step}/3 轮广告倒计时结束`);
+        const skipBtn = page.locator("button:has-text('Skip'), button:has-text('Skip Ad')");
+
+        // 智能轮询等待按钮变为可点击状态
+        let found = false;
+        for (let retry = 0; retry < 30; retry++) {
+          if (await skipBtn.count() > 0 && await skipBtn.first().isEnabled()) {
+            Logger.success(`第 ${step} 个 Skip 按钮已就绪，立即点击`);
+            await skipBtn.first().click({ force: true }).catch(() => { });
+            found = true;
+            break;
+          }
+          await Utils.sleep(1000);
+        }
+
+        if (!found) {
+          Logger.warn(`未能发现第 ${step} 个 Skip 按钮，尝试寻找 'Continue' 按钮...`);
+          const contBtn = page.locator("button:has-text('Continue')").filter({ visible: true });
+          if (await contBtn.count() > 0) {
+            await contBtn.first().click().catch(() => { });
+          }
+        }
+        await Utils.sleep(2000);
+      }
+
+      Logger.success("Linkvertise 原生广告跳过序列执行完毕");
+    } catch (e) {
+      Logger.debug("广告跳过流程中断（可能已被 Bypass 直接跳过）");
+    }
+  }
+}
+
+/**
+ * ============================================================================
  * 6. TEOBOT - 业务逻辑核心
  * ============================================================================
  */
@@ -420,7 +471,7 @@ class TeoBot {
       // 直接寻找包含 Claims Today 的段落
       const container = page.locator('p:has-text("Claims Today:")');
       const text = await container.innerText();
-      
+
       // 使用严格正则解析: X / Y
       const match = text.match(/(\d+)\s*\/\s*(\d+)/);
       if (match) {
@@ -429,7 +480,7 @@ class TeoBot {
         const remaining = Math.max(0, total - done);
         return { done, total, remaining };
       }
-      
+
       // 兜底方案：寻找 badge 标签
       const badge = page.locator("span.badge:has-text('remaining')");
       if (await badge.count()) {
@@ -453,7 +504,6 @@ class TeoBot {
     const page = await this.context.newPage();
 
     const popupKiller = (p) => {
-      // 提速拦截：改为 100ms 探测
       setTimeout(async () => {
         try {
           const url = p.url();
@@ -463,7 +513,7 @@ class TeoBot {
             await p.close().catch(() => { });
           }
         } catch { }
-      }, 100); 
+      }, 1000);
     };
     this.context.on("page", popupKiller);
 
@@ -508,10 +558,22 @@ class TeoBot {
           await CaptchaSolver.solveTurnstile(page);
           await Utils.sleep(1000);
 
+          // --- 备选：如果 BypassCity 未生效且卡在 Linkvertise 广告页，启动暴力 Skip 序列 ---
+          if (page.url().includes("linkvertise.com")) {
+            await LinkvertiseAds.handleAds(page);
+          }
+
           const nextEvent = this.context.waitForEvent("page", { timeout: 30000 }).catch(() => null);
           if (await getLinkBtn.isVisible()) {
-            Logger.mouse("点击 [Get Link] 按钮 (启用了强制属性穿透策略)...");
-            await getLinkBtn.click({ force: true });
+            Logger.mouse("执行连招点击 (破开点击劫持)...");
+            await getLinkBtn.click({ delay: 500 }).catch(() => { });
+            await getLinkBtn.click({ force: true }).catch(() => { });
+          }
+
+          // --- 最终兜底：如果跳转到了 Linkvertise 广告墙，执行 Skip 序列 ---
+          await page.waitForLoadState("networkidle").catch(() => { });
+          if (page.url().includes("linkvertise.com")) {
+            await LinkvertiseAds.handleAds(page);
           }
 
           const adPage = await nextEvent;
@@ -568,21 +630,8 @@ class TeoBot {
           Logger.step("等待 Bypass 回调结果产出");
           await openLink.waitFor({ state: "visible", timeout: CONFIG.timeouts.bypassResult });
 
-          // --- 绝杀：暴力清除页面所有干扰层 ---
-          Logger.shield("正在暴力清理页面残余广告与遮罩层...");
-          await page.evaluate(() => {
-            const selectors = ['iframe', '.adsbygoogle', '#google_ads_frame', '[id*="pop"]', '[class*="modal"]', '[class*="overlay"]'];
-            selectors.forEach(s => {
-              document.querySelectorAll(s).forEach(el => el.remove());
-            });
-            // 顺便干掉 body 上的锁定样式
-            document.body.style.overflow = 'auto';
-            document.body.style.pointerEvents = 'auto';
-          });
-
-          Logger.mouse("执行连招点击 (破开点击劫持)...");
-          await openLink.click({ delay: 500 }).catch(() => {});
-          await openLink.click({ force: true }).catch(() => {});
+          Logger.mouse("点击 [Open bypassed Link] 返回 TeoHeberg 进行验证");
+          await openLink.click();
 
           // 最终回跳校验 (必须回到 Teoheberg 管理页面)
           try {
