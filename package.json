@@ -1,0 +1,16 @@
+{
+  "name": "teoheberg-autocoin-renew",
+  "version": "2.0.0",
+  "description": "Teoheberg coin earning and server renewal.",
+  "main": "bot.js",
+  "dependencies": {
+    "playwright": "^1.42.1",
+    "axios": "^1.6.8"
+  },
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
