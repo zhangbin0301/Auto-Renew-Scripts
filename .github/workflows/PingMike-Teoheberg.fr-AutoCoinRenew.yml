@@ -41,15 +41,14 @@ jobs:
           python-version: '3.11'
 
       # =========================
-      # 📦 安装所有依赖
+      # 📦 安装所有依赖 (版本锁定模式)
       # =========================
       - name: 📦 安装所有依赖
         run: |
-          npm init -y
-          npm install playwright axios
+          npm install
           sudo apt-get update
-          sudo apt-get install -y xvfb ffmpeg curl p7zip-full pulseaudio
-          pip install SpeechRecognition pydub
+          sudo apt-get install -y xvfb ffmpeg curl pulseaudio
+          pip install -r requirements.txt
 
       # =========================
       # 🌐 安装 Playwright 浏览器
@@ -72,7 +71,7 @@ jobs:
       - name: 🔍 检查 WARP 开关状态
         id: check_warp
         run: |
-          if grep -q "const USE_WARP = true" bot.js; then
+          if grep -qEi "const\s+USE_WARP_CONFIG\s*=\s*true" bot.js; then
             echo "enabled=true" >> $GITHUB_OUTPUT
           else
             echo "enabled=false" >> $GITHUB_OUTPUT
@@ -96,6 +95,7 @@ jobs:
           TEOHEBERG_REMEMBER_WEB_COOKIE: ${{ secrets.TEOHEBERG_REMEMBER_WEB_COOKIE }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ENABLE_WARP: ${{ steps.check_warp.outputs.enabled }}
         run: |
           # 确保截图目录存在
           mkdir -p screenshots
@@ -113,17 +113,15 @@ jobs:
           path: screenshots/
           retention-days: 3
           
-       # =========================
-       # 🕐 更新运行时间记录
-       # =========================
-      - name: 上传时间到time.txt
+      # =========================
+      # 📝 生成运行摘要 (Job Summary)
+      # =========================
+      - name: 📝 生成运行摘要
+        if: always()
         run: |
-          echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add time.txt
-          git diff --cached --quiet || git commit -m "🕐 更新运行时间"
-          git push || true    
+          if [ -f report.md ]; then
+            cat report.md >> $GITHUB_STEP_SUMMARY
+          fi
 
       # =========================
       # 🧹 自动清理历史记录 (保持 Actions 页面干净)
