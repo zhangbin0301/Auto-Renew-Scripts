@@ -414,20 +414,37 @@ class TeoBot {
     } catch { return "未知"; }
   }
 
-  /** 获取领币进度 */
+  /** 获取领币进度 (增强版：直接解析原始文字) */
   async fetchEarnProgress(page) {
     try {
-      const bar = page.locator(".progress-bar[role='progressbar']");
-      const done = parseInt(await bar.getAttribute("aria-valuenow") || "0");
-      const total = parseInt(await bar.getAttribute("aria-valuemax") || "3");
-      const badge = page.locator("span.badge:has-text('remaining')");
-      let rem = total - done;
-      if (await badge.count()) {
-        const match = (await badge.innerText()).match(/(\d+)/);
-        if (match) rem = parseInt(match[1]);
+      // 直接寻找包含 Claims Today 的段落
+      const container = page.locator('p:has-text("Claims Today:")');
+      const text = await container.innerText();
+      
+      // 使用严格正则解析: X / Y
+      const match = text.match(/(\d+)\s*\/\s*(\d+)/);
+      if (match) {
+        const done = parseInt(match[1]);
+        const total = parseInt(match[2]);
+        const remaining = Math.max(0, total - done);
+        return { done, total, remaining };
       }
-      return { done, total, remaining: Math.max(0, rem) };
-    } catch { return { done: 0, total: 3, remaining: 1 }; }
+      
+      // 兜底方案：寻找 badge 标签
+      const badge = page.locator("span.badge:has-text('remaining')");
+      if (await badge.count()) {
+        const badgeText = await badge.innerText();
+        const remMatch = badgeText.match(/(\d+)/);
+        if (remMatch) {
+          const rem = parseInt(remMatch[1]);
+          return { done: 3 - rem, total: 3, remaining: rem };
+        }
+      }
+      return { done: 0, total: 3, remaining: 1 };
+    } catch (e) {
+      Logger.debug("进度识别异常，启用安全冗余模式 (剩余 1 次)");
+      return { done: 0, total: 3, remaining: 1 };
+    }
   }
 
   /** 赚钱任务 (带探测、弹窗拦截和绕过) */
@@ -436,6 +453,7 @@ class TeoBot {
     const page = await this.context.newPage();
 
     const popupKiller = (p) => {
+      // 提速拦截：改为 100ms 探测
       setTimeout(async () => {
         try {
           const url = p.url();
@@ -445,7 +463,7 @@ class TeoBot {
             await p.close().catch(() => { });
           }
         } catch { }
-      }, 1000);
+      }, 100); 
     };
     this.context.on("page", popupKiller);
 
@@ -550,8 +568,21 @@ class TeoBot {
           Logger.step("等待 Bypass 回调结果产出");
           await openLink.waitFor({ state: "visible", timeout: CONFIG.timeouts.bypassResult });
 
-          Logger.mouse("点击 [Open bypassed Link] 返回 TeoHeberg 进行验证");
-          await openLink.click();
+          // --- 绝杀：暴力清除页面所有干扰层 ---
+          Logger.shield("正在暴力清理页面残余广告与遮罩层...");
+          await page.evaluate(() => {
+            const selectors = ['iframe', '.adsbygoogle', '#google_ads_frame', '[id*="pop"]', '[class*="modal"]', '[class*="overlay"]'];
+            selectors.forEach(s => {
+              document.querySelectorAll(s).forEach(el => el.remove());
+            });
+            // 顺便干掉 body 上的锁定样式
+            document.body.style.overflow = 'auto';
+            document.body.style.pointerEvents = 'auto';
+          });
+
+          Logger.mouse("执行连招点击 (破开点击劫持)...");
+          await openLink.click({ delay: 500 }).catch(() => {});
+          await openLink.click({ force: true }).catch(() => {});
 
           // 最终回跳校验 (必须回到 Teoheberg 管理页面)
           try {
