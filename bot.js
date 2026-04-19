@@ -284,10 +284,10 @@ class CaptchaSolver {
       if (targets.length === 0) {
         Logger.debug("🔍 全链路透视未发现明确验证组件");
         if (page.url().includes("bypass.city")) {
-          Logger.shield("启动 bypass.city 专属终极盲狙策略 (屏幕中心左偏移 125px)");
+          Logger.shield("启动 bypass.city 专属终极盲狙策略 (屏幕中心左偏移 110px)");
           const vp = page.viewportSize();
           if (vp) {
-            await page.mouse.click(vp.width / 2 - 125, vp.height / 2);
+            await page.mouse.click(vp.width / 2 - 110, vp.height / 2);
             await Utils.sleep(4000);
             return Logger.success("盲狙策略执行完毕");
           }
@@ -451,7 +451,7 @@ class LinkvertiseAds {
 class TeoBot {
   constructor(context) {
     this.context = context;
-    this.stats = { earnCount: 0, initialCoins: "0.00", finalCoins: "0.00", renewStatus: "💠 未达阈值", remainingTime: "未知" };
+    this.stats = { earnCount: 0, initialCoins: "0.00", finalCoins: "0.00", renewStatus: "💠 未达阈值", remainingTime: "未知", claimProgress: "0 / 3" };
   }
 
   /** 获取实时金币余额 */
@@ -522,6 +522,7 @@ class TeoBot {
         Logger.step(`正在导航至领币中心 (同步进度)`);
         await page.goto(CONFIG.urls.earn, { waitUntil: "networkidle" });
         const { done, total, remaining } = await this.fetchEarnProgress(page);
+        this.stats.claimProgress = `${done} / ${total}`;
         Logger.info(`领取进度快报: ${done}/${total} (今日剩余 ${remaining} 次额度)`);
 
         if (remaining <= 0) { Logger.success("当前各平台 Free Credits 已领满!"); break; }
@@ -727,16 +728,16 @@ class TeoBot {
   async report() {
     const { earnCount, initialCoins, finalCoins, renewStatus, remainingTime } = this.stats;
     const countDiff = (earnCount * 2.0).toFixed(1);
-    const earnReport = earnCount > 0 ? `✅ 任务执行成功 (+${countDiff})` : "❌ 今日未能领取或额度已满";
+    const earnStatus = earnCount > 0 ? `成功 +${countDiff}` : "探测结束/额度已满";
 
     const reportStr = [
-      "📋 Teoheberg 每日机器人报告 (工业化版)",
+      "📋 Teoheberg 每日状况报告 ",
       "",
-      `📊 领币结果: ${earnReport}`,
+      `📊 领币任务: ${this.stats.claimProgress} (${earnStatus})`,
       `📊 续期执行: ${renewStatus}`,
       `💰 最初余额: ${initialCoins}`,
       `💰 当前余额: ${finalCoins}`,
-      `💡 剩余耐用: ${remainingTime}`,
+      `💡 剩余时间: ${remainingTime}`,
       `🕐 执行时间: ${Utils.getBeijingTime()}`,
     ].join("\n");
 
