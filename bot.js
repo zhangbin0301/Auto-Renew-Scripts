@@ -41,7 +41,7 @@ const CONFIG = {
   // 任务限制与重试
   limits: {
     earnAttempts: 1,        // 领金币最大探测次数 (确保领满)
-    renewRetry: 3,         // 续期任务最大尝试次数
+    renewRetry: 1,         // 续期任务最大尝试次数
   },
 
   // 超时配置 (单位: ms)
