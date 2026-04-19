@@ -451,7 +451,7 @@ class LinkvertiseAds {
 class TeoBot {
   constructor(context) {
     this.context = context;
-    this.stats = { earnCount: 0, initialCoins: "0.00", finalCoins: "0.00", renewStatus: "💠 未达阈值", remainingTime: "未知", claimProgress: "0 / 3" };
+    this.stats = { earnCount: 0, initialCoins: "0.00", finalCoins: "0.00", earnStatus: "等待扫码", renewStatus: "💠 未达阈值", remainingTime: "未知", claimProgress: "0 / 3" };
   }
 
   /** 获取实时金币余额 */
@@ -525,7 +525,14 @@ class TeoBot {
         this.stats.claimProgress = `${done} / ${total}`;
         Logger.info(`领取进度快报: ${done}/${total} (今日剩余 ${remaining} 次额度)`);
 
-        if (remaining <= 0) { Logger.success("当前各平台 Free Credits 已领满!"); break; }
+        if (remaining <= 0) { 
+          this.stats.earnStatus = "今日量已满";
+          Logger.success("当前各平台 Free Credits 已领满!"); 
+          break; 
+        }
+        
+        // 标记为尝试中，如果循环结束还是这个状态，说明全部失败了
+        if (this.stats.earnCount === 0) this.stats.earnStatus = "任务执行失败";
 
         const btn = page.locator("a:has-text('Commencer maintenant'), a[href*='/linkvertise/generate']");
         if (!await btn.count()) { Logger.warn("无法检测到生成按钮，可能平台暂时关闭了入口"); break; }
@@ -639,6 +646,7 @@ class TeoBot {
             await page.waitForURL(u => u.hostname.includes("teoheberg.fr"), { timeout: 30000 });
             Logger.success(`第 ${i} 轮任务执行成功，已确认返回管理端`);
             this.stats.earnCount++;
+            this.stats.earnStatus = `成功 +${(this.stats.earnCount * 2.0).toFixed(1)}`;
           } catch (e) {
             await Utils.saveDebug(page, `earn_retry_${i}_return_fail`);
             throw new Error("未能成功返回 Teoheberg 目标网页，本轮金币可能无效");
@@ -726,9 +734,7 @@ class TeoBot {
 
   /** 生成并发送报告 */
   async report() {
-    const { earnCount, initialCoins, finalCoins, renewStatus, remainingTime } = this.stats;
-    const countDiff = (earnCount * 2.0).toFixed(1);
-    const earnStatus = earnCount > 0 ? `成功 +${countDiff}` : "探测结束/额度已满";
+    const { earnStatus, initialCoins, finalCoins, renewStatus, remainingTime } = this.stats;
 
     const reportStr = [
       "📋 Teoheberg 每日状况报告 ",
