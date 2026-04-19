@@ -393,8 +393,19 @@ class TeoBot {
           const getLinkBtn = page.locator("button:has-text('Get Link'), button:has-text('Free Access'), [dusk='fullsize-get-content-btn']").filter({ hasNotText: /Login|Register/i }).first();
           await getLinkBtn.waitFor({ state: "visible", timeout: CONFIG.timeouts.getLink }).catch(() => {});
 
+          // --- 增强版弹窗拦截 (涵盖 AGREE, ACCEPT, CONFIRM 等) ---
+          const lvConsent = page.locator("#qc-cmp2-container button, .qc-cmp2-container button, button:has-text('AGREE'), button:has-text('ACCEPT'), button:has-text('CONFIRM')").filter({ visible: true });
+          if (await lvConsent.count() > 0) {
+            Logger.info("🛡️ 自动秒杀 Linkvertise 隐私协议/同意弹窗");
+            await lvConsent.first().click().catch(() => {});
+            await Utils.sleep(1000);
+          }
+
           const nextEvent = this.context.waitForEvent("page", { timeout: 30000 }).catch(() => null);
-          if (await getLinkBtn.isVisible()) await getLinkBtn.click();
+          if (await getLinkBtn.isVisible()) {
+            Logger.info("🖱️ 点击 Get Link 按钮 (含强制属性)...");
+            await getLinkBtn.click({ force: true });
+          }
           
           const adPage = await nextEvent;
           if (!adPage) throw new Error("未抓取到广告页面");
