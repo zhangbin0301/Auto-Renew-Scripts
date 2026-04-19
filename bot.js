@@ -1,7 +1,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { execSync } = require("child_process");
+const { execSync, execFileSync } = require("child_process");
 const { chromium } = require("playwright");
 const axios = require("axios");
 
@@ -11,7 +11,8 @@ const axios = require("axios");
  * true:  开启。GitHub Actions 会自动安装并运行 WARP 服务，脚本会执行 IP 切换。
  * false: 关闭。不启动 WARP，使用原始 IP 运行 (适合本地调试)。
  */
-const USE_WARP = true;
+const USE_WARP_CONFIG = true; // [控制台开关] true: 开启 WARP / false: 关闭
+const USE_WARP = process.env.ENABLE_WARP !== undefined ? process.env.ENABLE_WARP === 'true' : USE_WARP_CONFIG;
 
 /**
  * ============================================================================
@@ -66,7 +67,6 @@ const CONFIG = {
     screenshots: path.resolve(__dirname, "screenshots"),
     userData: path.resolve(__dirname, "user_data"),
     audioSolver: path.resolve(__dirname, "solve-audio.py"),
-    buster: path.resolve(__dirname, "extensions/buster/unpacked"),
   },
 
   // Telegram 通知
@@ -208,6 +208,26 @@ const Utils = {
       await page.mouse.wheel(0, Utils.rand(200, 600));
       await Utils.sleep(Utils.rand(500, 1500));
     }
+  },
+
+  /** 环境依赖预检 */
+  async checkDependencies() {
+    Logger.step("执行系统环境依赖预检 (FFmpeg / Python / Curl)");
+    const deps = [
+      { name: "ffmpeg", cmd: process.platform === "win32" ? "where ffmpeg" : "which ffmpeg" },
+      { name: "python", cmd: process.platform === "win32" ? "where python" : "which python3 || which python" },
+      { name: "curl", cmd: process.platform === "win32" ? "where curl" : "which curl" }
+    ];
+
+    for (const dep of deps) {
+      try {
+        execSync(dep.cmd, { stdio: "ignore" });
+        Logger.success(`依赖检测通过: ${dep.name}`);
+      } catch (e) {
+        Logger.error(`关键依赖缺失: ${dep.name}。请确保系统已安装该组件并将其加入 PATH。`);
+        if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true") process.exit(1); // CI 环境下直接退出，本地仅警告
+      }
+    }
   }
 };
 
@@ -328,66 +348,99 @@ class CaptchaSolver {
     }
   }
 
-  /** 处理 reCAPTCHA (含图像识别与 Buster 插件) */
+  /** 处理 reCAPTCHA (精简强化版：纯 Python 音频路径)
+   *  @returns {Promise<boolean>} true = 验证通过(含静默通过) / false = 验证失败
+   */
   static async solveRecaptcha(page, context) {
     Logger.key("准备开始破解 reCAPTCHA 音频验证挑战...");
     try {
-      const iframe = await page.waitForSelector("iframe[src*=\"anchor\"]");
+      // 1. 获取主锚点 iframe
+      const iframe = await page.waitForSelector("iframe[src*=\"anchor\"]", { timeout: 10000 });
       const frame = await iframe.contentFrame();
       Logger.mouse("点击 reCAPTCHA 复选框...");
       await frame.click("#recaptcha-anchor", { force: true });
       await Utils.sleep(3000);
 
-      const bframeEl = await page.waitForSelector("iframe[src*=\"bframe\"]", { timeout: 5000 }).catch(() => null);
-      if (bframeEl) {
-        const bframe = await bframeEl.contentFrame();
-        Logger.info("检测到图像挑战卡片，尝试提取音频特征...");
+      const bframeEl = await page.waitForSelector("iframe[src*=\"bframe\"]", { timeout: 8000 }).catch(() => null);
+      if (!bframeEl) {
+        Logger.info("未检测到后续验证卡片，可能已通过静默验证");
+        return true;
+      }
 
-        if (fs.existsSync(CONFIG.paths.buster)) {
-          Logger.shield("发现 Buster 插件，正在启动自动化破解序列...");
-          const reload = bframe.locator("#recaptcha-reload-button");
-          const audio = bframe.locator("#recaptcha-audio-button");
-          await reload.waitFor();
-          await audio.waitFor();
-          const r = await reload.boundingBox();
-          const a = await audio.boundingBox();
-          if (r && a) {
-            const dx = a.x - r.x;
-            const dy = a.y - r.y;
-            await page.mouse.click(a.x + dx, a.y + dy);
-            await Utils.sleep(5000);
-          }
-        } else {
-          Logger.step("提取音频流并调用 Python 识别算法");
-          await bframe.click("#recaptcha-audio-button");
-          await Utils.sleep(4000);
-          const src = await bframe.getAttribute("#audio-source", "src");
-          if (src) {
-            const mp3 = path.join(os.tmpdir(), `teo_${Date.now()}.mp3`);
-            const wav = mp3.replace(".mp3", ".wav");
-            execSync(`curl -s "${src}" -o "${mp3}"`);
-            execSync(`ffmpeg -loglevel error -y -i "${mp3}" "${wav}"`);
-            const text = execSync(`python "${CONFIG.paths.audioSolver}" "${wav}"`).toString().trim();
-            Logger.info(`语言模型输出识别结果: ${text}`);
-            await bframe.fill("#audio-response", text);
-            await bframe.click("#recaptcha-verify-button");
-            await Utils.sleep(5000);
+      const bframe = await bframeEl.contentFrame();
+
+      // 尝试最多 3 次重刷验证码
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        Logger.info(`执行音频识别序列 (尝试 ${attempt}/3)...`);
+
+        // 点击进入音频模式
+        await bframe.click("#recaptcha-audio-button").catch(() => {});
+        await Utils.sleep(3000);
+
+        // 检查是否受限（IP 被封）
+        if (await bframe.locator(".rc-doscaptcha-body-text").isVisible()) {
+          Logger.error("reCAPTCHA 反馈异常：IP 可能已被暂时拉黑，无法使用音频验证");
+          await Utils.saveDebug(page, "recaptcha_ip_blocked");
+          return false;
+        }
+
+        const audioSource = bframe.locator("#audio-source");
+        const src = await audioSource.getAttribute("src").catch(() => null);
+
+        if (src) {
+          const mp3 = path.join(os.tmpdir(), `teo_${Date.now()}.mp3`);
+          const wav = mp3.replace(".mp3", ".wav");
+
+          Logger.step(`正在下载音频流: ${src.slice(0, 40)}...`);
+          try {
+            execFileSync("curl", ["-s", "-L", src, "-o", mp3, "--retry", "3"], { timeout: 15000, stdio: "pipe" });
+
+            Logger.step("使用 FFmpeg 进行高保真音频转换 (MP3 -> WAV)");
+            execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-i", mp3, wav], { timeout: 10000, stdio: "pipe" });
+
+            Logger.step("调用 Python 语言模型进行识别...");
+            let text = "";
+            try {
+              text = execFileSync("python3", [CONFIG.paths.audioSolver, wav], { timeout: 20000 }).toString().trim();
+            } catch {
+              text = execFileSync("python", [CONFIG.paths.audioSolver, wav], { timeout: 20000 }).toString().trim();
+            }
+
+            if (text && text.length > 2) {
+              Logger.success(`语音模型识别成功: ${text}`);
+              await bframe.fill("#audio-response", text);
+              await bframe.click("#recaptcha-verify-button");
+              await Utils.sleep(5000);
+
+              const solved = await page.evaluate(() => {
+                const textarea = document.querySelector("textarea[name='g-recaptcha-response']");
+                return textarea && textarea.value.length > 50;
+              });
+
+              if (solved) {
+                Logger.success("reCAPTCHA 验证挑战解析成功!");
+                return true;
+              }
+            } else {
+              Logger.warn("语音模型输出为空或置信度过低，准备刷新验证码");
+            }
+          } catch (err) {
+            Logger.warn(`识别链路环节出错: ${err.message}`);
           }
         }
+
+        // 如果走到这里没 return，说明本轮失败，点击刷新
+        Logger.info("点击刷新验证码...");
+        await bframe.click("#recaptcha-reload-button").catch(() => {});
+        await Utils.sleep(3000);
       }
 
-      // 轮询直到验证成功
-      for (let i = 0; i < 60; i++) {
-        const solved = await page.evaluate(() => {
-          const textarea = document.querySelector("textarea[name='g-recaptcha-response']");
-          return textarea && textarea.value.length > 30;
-        });
-        if (solved) return Logger.success("reCAPTCHA 验证挑战解析成功!");
-        await Utils.sleep(2000);
-      }
+      Logger.warn("reCAPTCHA 音频识别 3 次全部失败，放弃本次挑战");
+      return false;
     } catch (e) {
-      Logger.warn("reCAPTCHA 破解流程失败: " + e.message);
-      await Utils.saveDebug(page, "recaptcha_error");
+      Logger.warn("reCAPTCHA 破解全流程异常中断: " + e.message);
+      await Utils.saveDebug(page, "recaptcha_fatal_error");
+      return false;
     }
   }
 }
@@ -517,20 +570,29 @@ class TeoBot {
     };
     this.context.on("page", popupKiller);
 
+    let startCoins = null;
+
     try {
       for (let i = 1; i <= CONFIG.limits.earnAttempts; i++) {
         Logger.step(`正在导航至领币中心 (同步进度)`);
         await page.goto(CONFIG.urls.earn, { waitUntil: "networkidle" });
+
+        // 首轮循环锁定开始余额，供后续计算真实领取金额
+        if (startCoins === null) {
+          const parsed = parseFloat(await this.fetchCoins(page));
+          startCoins = isNaN(parsed) ? 0 : parsed;
+          Logger.coin(`锁定领币起始余额: ${startCoins} Credits`);
+        }
         const { done, total, remaining } = await this.fetchEarnProgress(page);
         this.stats.claimProgress = `${done} / ${total}`;
         Logger.info(`领取进度快报: ${done}/${total} (今日剩余 ${remaining} 次额度)`);
 
-        if (remaining <= 0) { 
+        if (remaining <= 0) {
           this.stats.earnStatus = "今日量已满";
-          Logger.success("当前各平台 Free Credits 已领满!"); 
-          break; 
+          Logger.success("当前各平台 Free Credits 已领满!");
+          break;
         }
-        
+
         // 标记为尝试中，如果循环结束还是这个状态，说明全部失败了
         if (this.stats.earnCount === 0) this.stats.earnStatus = "任务执行失败";
 
@@ -573,8 +635,7 @@ class TeoBot {
 
           const nextEvent = this.context.waitForEvent("page", { timeout: 30000 }).catch(() => null);
           if (await getLinkBtn.isVisible()) {
-            Logger.mouse("执行连招点击 (破开点击劫持)...");
-            await getLinkBtn.click({ delay: 500 }).catch(() => { });
+            Logger.mouse("触发 [Get Link] 按钮 (强制点击以破开点击劫持)...");
             await getLinkBtn.click({ force: true }).catch(() => { });
           }
 
@@ -646,7 +707,10 @@ class TeoBot {
             await page.waitForURL(u => u.hostname.includes("teoheberg.fr"), { timeout: 30000 });
             Logger.success(`第 ${i} 轮任务执行成功，已确认返回管理端`);
             this.stats.earnCount++;
-            this.stats.earnStatus = `成功 +${(this.stats.earnCount * 2.0).toFixed(1)}`;
+            const curParsed = parseFloat(await this.fetchCoins(page));
+            const curCoins = isNaN(curParsed) ? startCoins : curParsed;
+            const delta = Math.max(0, curCoins - startCoins);
+            this.stats.earnStatus = `成功 +${delta.toFixed(2)}`;
           } catch (e) {
             await Utils.saveDebug(page, `earn_retry_${i}_return_fail`);
             throw new Error("未能成功返回 Teoheberg 目标网页，本轮金币可能无效");
@@ -654,7 +718,7 @@ class TeoBot {
 
           await Utils.sleep(3000);
         } catch (err) {
-          Logger.warn(`第 ${i} 轮任务异常异常中断: ${err.message}`);
+          Logger.warn(`第 ${i} 轮任务异常中断: ${err.message}`);
           await Utils.saveDebug(page, `earn_retry_${i}_error`);
         }
       }
@@ -676,14 +740,27 @@ class TeoBot {
       Logger.step("导航至服务器列表页获取详情");
       await page.goto(CONFIG.urls.servers);
       const remainingTimeBlock = page.locator("text=Renewal Required In").first();
-      const rawText = await remainingTimeBlock.locator("xpath=..").innerText();
-      this.stats.remainingTime = rawText.replace(/Renewal Required In:\s*/i, "").trim();
-      Logger.info(`检测到服务器剩余耐耗: ${this.stats.remainingTime}`);
+      let rawText = "";
+      if (await remainingTimeBlock.count() > 0) {
+        rawText = await remainingTimeBlock.locator("xpath=..").innerText().catch(() => "");
+      }
+      if (rawText) {
+        this.stats.remainingTime = rawText.replace(/Renewal Required In:\s*/i, "").trim();
+        Logger.info(`检测到服务器剩余耐耗: ${this.stats.remainingTime}`);
+      } else {
+        Logger.warn("未能定位到 'Renewal Required In' 字段，页面结构可能已调整");
+        this.stats.remainingTime = "未知";
+      }
 
       const dayMatch = this.stats.remainingTime.match(/(\d+)\s*day/i);
       const hourMatch = this.stats.remainingTime.match(/(\d+)\s*h/i);
       const urgent = /less than 1/i.test(this.stats.remainingTime);
-      const need = (dayMatch && parseInt(dayMatch[1]) <= 1) || (hourMatch && parseInt(hourMatch[1]) < 24) || urgent;
+      // 优先看天数；有天数就不再回落到小时(避免 "2 days 5h" 被误判为紧急)
+      let need = urgent;
+      if (!need) {
+        if (dayMatch) need = parseInt(dayMatch[1]) <= 1;
+        else if (hourMatch) need = parseInt(hourMatch[1]) < 24;
+      }
 
       if (!need) {
         Logger.info(`判定结论: 时间充足，无需消耗金币进行冗余续期`);
@@ -703,14 +780,20 @@ class TeoBot {
             await Utils.humanize(page);
             Logger.mouse("触发 [Renew] 续期按钮...");
             await btn.first().click();
-            await Utils.sleep(5000);
 
-            if (await page.locator('iframe[src*="recaptcha"]').count()) {
-              await CaptchaSolver.solveRecaptcha(page, this.context);
+            // 动态等待验证码 iframe 出现(最多 10s)，避免固定 sleep 抢跑
+            const captchaIframe = page.locator('iframe[src*="recaptcha"]').first();
+            const hasCaptcha = await captchaIframe.waitFor({ state: "visible", timeout: 10000 }).then(() => true).catch(() => false);
+
+            if (hasCaptcha) {
+              const ok = await CaptchaSolver.solveRecaptcha(page, this.context);
+              if (!ok) throw new Error("reCAPTCHA 未通过，跳过本轮 Verify 提交");
+            } else {
+              await Utils.sleep(2000); // 无验证码也稍等页面稳定
             }
 
-            const submit = page.locator("button:has-text('Verify'), button[type='submit']").first();
-            Logger.mouse("点击 [Verify] 完成最终续期确认...");
+            const submit = page.locator("#renewal-form button[type='submit']").first();
+            Logger.mouse("点击 [Verify & Renew] 完成最终续期确认...");
             await submit.click();
             await Utils.sleep(8000);
 
@@ -737,17 +820,20 @@ class TeoBot {
     const { earnStatus, initialCoins, finalCoins, renewStatus, remainingTime } = this.stats;
 
     const reportStr = [
-      "📋 Teoheberg 每日状况报告 ",
-      "",
-      `📊 领币任务: ${this.stats.claimProgress} (${earnStatus})`,
-      `📊 续期执行: ${renewStatus}`,
-      `💰 最初余额: ${initialCoins}`,
-      `💰 当前余额: ${finalCoins}`,
-      `💡 剩余时间: ${remainingTime}`,
-      `🕐 执行时间: ${Utils.getBeijingTime()}`,
+      "📋 Teoheberg 状况报告 ",
+      `🪙 领币任务: ${this.stats.claimProgress} (${earnStatus})`,
+      `🔄 续期执行: ${renewStatus}`,
+      "─────────────────────────",
+      `💵 最初余额: ${initialCoins} Credits`,
+      `🏦 当前余额: ${finalCoins} Credits`,
+      `⏳ 剩余时间: ${remainingTime}`,
+      `📅 执行时间: ${Utils.getBeijingTime()}`,
+      "━━━━━━━━━━━━━━━━━━━━━━━━",
     ].join("\n");
 
     console.log("\n" + reportStr + "\n");
+    // 同步写入 report.md 供 CI Summary 使用
+    try { fs.writeFileSync(path.join(__dirname, "report.md"), `### 🤖 Teoheberg 运行简报\n\n${reportStr}`); } catch { }
     await Utils.sendTelegram(reportStr);
   }
 }
@@ -759,6 +845,9 @@ class TeoBot {
  */
 async function main() {
   console.log(`\n🚀 Teoheberg Bot [INDUSTRIAL ENGINE v2.0] 启动序列开始...\n`);
+
+  // 环境预检
+  await Utils.checkDependencies();
 
   if (CONFIG.useWarp) await Utils.rotateIP();
 
