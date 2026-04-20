@@ -1,0 +1,68 @@
+name: Faiz-XServerGame-Auto-Renew
+
+on:
+  schedule:
+    # 每天北京时间21:00运行
+    - cron: '0 13 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: write
+  actions: write  
+
+jobs:
+  auto-login:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    
+    steps:
+    - name: 📥 检出私有代码仓库
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository_owner }}/Faiz-XServerGame-Auto-Renew
+        token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      
+    - name: 🐍 配置 Python 环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 安装 Python 依赖项
+      # 删除了 working-directory，直接在根目录找 requirements.txt
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: 🌐 安装 Playwright 浏览器
+      run: python -m playwright install --with-deps chromium
+        
+    - name: 🔤 安装系统日文字体
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
+        
+    - name: 🚀 执行 XServer 自动续期任务
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TZ: Asia/Shanghai
+      # 删除了 working-directory，直接在根目录运行 main.py
+      run: python main.py
+        
+    - name: 📤 上传运行截图/结果
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: xserver-results-${{ github.run_number }}
+        # 匹配根目录下所有的 png 图片
+        path: "*.png"
+        retention-days: 7
+        if-no-files-found: ignore
+
+    - name: 🧹 清理旧的工作流运行记录
+      uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      with:
+        repository: ${{ github.repository }}
+        older-than-seconds: 3600

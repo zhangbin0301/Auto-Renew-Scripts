@@ -1,0 +1,104 @@
+name: My-Appwrite.io-AutoLogin
+
+on:
+    # 每 3 天跑 1 次
+    # UTC 19:12 = 北京时间次日 03:12
+    schedule:
+        - cron: "12 19 */3 * *"
+
+    # 允许手动触发
+    workflow_dispatch:
+
+# 给 workflow 开写仓库和清理 actions 的权限
+permissions:
+    contents: write
+    actions: write
+
+jobs:
+    renew:
+        # 运行环境
+        runs-on: ubuntu-latest
+
+        # 最长运行 30 分钟，超时自动终止
+        timeout-minutes: 30
+
+        steps:
+            # 检出仓库代码到 scripts 目录
+            - name: Checkout private repo (My-Appwrite.io-AutoLogin)
+              uses: actions/checkout@v4
+              with:
+                  repository: ${{ github.repository_owner }}/My-Appwrite.io-AutoLogin
+                  token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+                  path: scripts
+
+            # 安装 Python 3.10
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
+
+            # 安装系统依赖、Python 依赖、Playwright 浏览器
+            - name: Install dependencies
+              working-directory: scripts
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y xvfb
+                  pip install --upgrade pip
+                  pip install -r requirements.txt -q
+                  playwright install --with-deps chromium
+
+            # 恢复上一次保存的 storage state
+            # 如果第一次没有缓存，这一步会自动跳过，不会报致命错误
+            - name: Restore storage state cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: scripts/appwrite-storage-state.json
+                  key: appwrite-storage-state
+                  restore-keys: appwrite-storage-state
+
+            # 运行 Appwrite 自动登录脚本
+            # 逻辑：
+            #   1. 先尝试 storage state
+            #   2. storage 失效则回退账号密码登录
+            #   3. 登录成功后覆盖更新 storage
+            - name: Run Appwrite auto login script
+              working-directory: scripts
+              env:
+                  APPWRITE_EMAIL: ${{ secrets.APPWRITE_EMAIL }}
+                  APPWRITE_PASSWORD: ${{ secrets.APPWRITE_PASSWORD }}
+                  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+                  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+                  HEADLESS: "1"
+                  MAX_RETRIES: "3"
+                  RETRY_DELAY_MS: "3000"
+              run: |
+                  python3 appwrite_main.py
+
+            # 保存新的 storage state
+            # 只有文件存在时才缓存，避免首次失败时报错
+            - name: Save storage state cache
+              if: ${{ always() && hashFiles('scripts/appwrite-storage-state.json') != '' }}
+              uses: actions/cache/save@v4
+              with:
+                  path: scripts/appwrite-storage-state.json
+                  key: appwrite-storage-state-${{ github.run_id }}
+
+            # 更新最后运行时间并提交到仓库
+            - name: Update Time
+              working-directory: scripts
+              run: |
+                  echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
+                  git config user.name "github-actions"
+                  git config user.email "actions@github.com"
+                  git add time.txt
+                  git diff --cached --quiet || git commit -m "🕐 更新运行时间"
+                  git push || true
+
+            # 清理 24 小时以前的旧 workflow 运行记录
+            - name: Clean up old workflow runs
+              uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              with:
+                  repository: ${{ github.repository }}
+                  older-than-seconds: 86400

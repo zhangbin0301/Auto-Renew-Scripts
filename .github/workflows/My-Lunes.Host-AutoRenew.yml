@@ -1,0 +1,100 @@
+name: My-Lunes.Host-AutoRenew
+
+on:
+  schedule:
+    # 每 4 天运行一次 (UTC 时间 0:00)
+    - cron: '0 0 */4 * *'
+  workflow_dispatch: # 允许手动点击运行
+
+permissions:
+  contents: write
+  actions: write  
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4 # 升级到 v4
+        with:
+          repository: ${{ github.repository_owner }}/My-Lunes.Host-AutoRenew
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
+          fetch-depth: 0
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5 # 升级到 v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpci3 libegl1 libgles2 libnss3
+
+      - name: 安装 Python 依赖
+        run: |
+          pip install -r requirements.txt -q > /dev/null 2>&1
+                    
+      - name: 📦 安装 Hysteria2 客户端
+        run: |
+          wget -O hysteria https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+          chmod +x hysteria
+          sudo mv hysteria /usr/local/bin/hysteria
+          hysteria version
+        
+      - name: 📦 安装 Xray 内核
+        run: |
+          mkdir -p ./xray_temp
+          wget -O xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -q xray.zip -d ./xray_temp
+          sudo mv ./xray_temp/xray /usr/local/bin/xray
+          sudo chmod +x /usr/local/bin/xray
+          # 清理临时文件
+          rm -rf ./xray_temp xray.zip
+          echo "✅ Xray 安装完成，且未污染根目录"
+          
+      - name: 运行Main脚本
+        env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+          USER_EMAIL: ${{ secrets.USER_EMAIL }}
+          USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          touch storage_state.json  # 确保文件存在，避免 git add 时完全找不到文件
+          python main.py
+
+      - name: 提交变更 (README & JSON)
+        if: always()
+        run: |
+          # 修改 README 内容 (覆盖写入，包含时间戳)
+          CN_TIME=$(date -d "+8 hours" "+%Y-%m-%d %H:%M:%S")
+          echo "# Lunes.Host Auto Renew" > README.md
+          echo "" >> README.md
+          echo "✅ 任务最后执行时间 (北京): \`$CN_TIME\`" >> README.md
+          echo "" >> README.md
+          echo "> 状态由 GitHub Actions 自动维护" >> README.md
+          
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add storage_state.json README.md || true
+          
+          git diff --staged --quiet || git commit -m "Update Lunes.Host State & README [skip ci]"
+          git push origin ${{ github.ref_name }} || echo "Push failed"
+
+      - name: 上传截图结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ./*.png
+
+      - name: 清理运行历史
+        if: always()
+        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+        with:
+          repository: ${{ github.repository }}
+          older-than-seconds: 86400
+        env:
+          GITHUB_TOKEN: ${{ github.token }}  
