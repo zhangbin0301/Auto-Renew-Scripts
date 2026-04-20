@@ -7,7 +7,7 @@ const stealthPlugin = require("puppeteer-extra-plugin-stealth")();
 chromium.use(stealthPlugin);
 const axios = require("axios");
 
-const USE_WARP_CONFIG = true; // [控制台开关] true: 开启 WARP / false: 关闭
+const USE_WARP_CONFIG = false; // [控制台开关] true: 开启 WARP / false: 关闭
 const USE_WARP = process.env.ENABLE_WARP !== undefined ? process.env.ENABLE_WARP === 'true' : USE_WARP_CONFIG;
 
 /**
@@ -37,8 +37,8 @@ const CONFIG = {
 
   // 任务限制与重试
   limits: {
-    earnAttempts: 3,        // 领金币最大探测次数
-    renewRetry: 2,         // 续期任务最大尝试次数
+    earnAttempts: 1,        // 领金币最大探测次数
+    renewRetry: 1,         // 续期任务最大尝试次数
   },
 
   // 超时配置 (单位: ms)
@@ -246,7 +246,7 @@ class BrowserManager {
     const height = 1080 + Math.floor(Utils.rand(-50, 50));
 
     const context = await chromium.launchPersistentContext(CONFIG.paths.userData, {
-      headless: false,
+      headless: true,
       userAgent: ua,
       viewport: { width, height },
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
@@ -331,6 +331,11 @@ class CaptchaSolver {
 
           // 25s 轮询: iframe 分离 OR token 注入 即为通过; 4/8/12s 补点击
           for (let i = 0; i < 25; i++) {
+            if (page.isClosed()) {
+              Logger.warn("页面已在 Turnstile 轮询中途关闭/跳转，中止突破");
+              return false;
+            }
+
             if (frame.isDetached()) {
               Logger.success("CF 组件已分离 (5s 盾/挑战通过)");
               return true;
@@ -580,14 +585,17 @@ class TeoBot {
     const popupKiller = (p) => {
       setTimeout(async () => {
         try {
+          if (p.isClosed()) return;
           const url = p.url();
           const allowed = CONFIG.allowedDomains.some(d => url.includes(d));
           if (!allowed && url !== "about:blank") {
-            Logger.shield(`拦截并秒杀非预期广告弹窗: ${url.slice(0, 40)}...`);
-            await p.close().catch(() => { });
+            Logger.shield(`拦截并秒杀非预期广告弹窗: ${url}`);
+            // 给 Stealth 留下窗口期，避免 Target Closed 报错
+            await p.waitForLoadState("domcontentloaded").catch(() => { });
+            if (!p.isClosed()) await p.close().catch(() => { });
           }
         } catch { }
-      }, 1000);
+      }, 3000);
     };
     this.context.on("page", popupKiller);
 
@@ -670,9 +678,11 @@ class TeoBot {
           let adUrl = "";
 
           if (adPage) {
-            await adPage.waitForLoadState("domcontentloaded");
+            await adPage.waitForLoadState("domcontentloaded").catch(() => { });
             adUrl = adPage.url();
-            await adPage.close();
+            // 稍等 1s 确保 Stealth 插件处理完毕后再关闭
+            await Utils.sleep(1000);
+            if (!adPage.isClosed()) await adPage.close().catch(() => { });
           } else {
             // --- 核心改进：处理“原地跳转”的 Paywall 页面 ---
             const currentUrl = page.url();
@@ -689,17 +699,29 @@ class TeoBot {
           if (!adUrl || (adUrl.includes("linkvertise.com") && adUrl.includes("/generate"))) {
             throw new Error("抓取到的链接无效或跳转未完成");
           }
-          Logger.success(`已成功捕获目标链接: ${adUrl.slice(0, 50)}...`);
+          Logger.success(`已成功捕获目标链接: ${adUrl}`);
 
-          Logger.step("导航至 bypass.city 执行解链任务");
-          await page.goto(CONFIG.urls.bypass, { waitUntil: "networkidle" });
+          Logger.step("导航至 bypass.city 执行解链任务 (增强型导航)");
+          try {
+            await page.goto(CONFIG.urls.bypass, { waitUntil: "domcontentloaded", timeout: 20000 });
+          } catch (e) {
+            Logger.warn("主页导航缓慢，尝试强制停止并继续执行...");
+            await page.evaluate(() => window.stop()).catch(() => {});
+          }
 
           // --- 补位：清理 bypass.city 可能存在的 Cookie 同意弹窗/遮挡 ---
-          const bypassOk = page.locator("button:has-text('Okay'), button:has-text('OK'), .btn-primary:has-text('Accept')").filter({ visible: true });
+          const bypassOk = page.locator("button:has-text('Okay'), button:has-text('OK'), .btn-primary:has-text('Accept'), #okay-button").filter({ visible: true });
           if (await bypassOk.count() > 0) {
             Logger.shield("清理 bypass.city 站内干扰弹窗...");
             await bypassOk.first().click().catch(() => { });
             await Utils.sleep(1000);
+          }
+
+          // 核心加固：如果 input 没出来，可能需要直接构造跳转
+          const inputField = page.locator("input[placeholder*='enter a link']");
+          if (!await inputField.isVisible()) {
+             Logger.warn("解链大厅渲染异常，尝试暴力重载页面...");
+             await page.reload({ waitUntil: "domcontentloaded" });
           }
 
           Logger.info(`正在填入 Linkvertise 原始链接并提交`);
@@ -716,25 +738,58 @@ class TeoBot {
 
           await CaptchaSolver.solveTurnstile(page);
 
-          const openLink = page.locator("a:has-text('Open bypassed Link')");
-          Logger.step("等待 Bypass 回调结果产出");
-          await openLink.waitFor({ state: "visible", timeout: CONFIG.timeouts.bypassResult });
+          // --- 核心加固：动态循环判定 (支持处理结果页出现的二次验证码) ---
+          Logger.step("等待 Bypass 结果产出 (含二次验证码监控)");
+          const openLink = page.locator("a:has-text('Open bypassed Link'), a:has-text('Open Link'), a:has-text('Success')").first();
+          
+          let solvedSecond = false;
+          const startTime = Date.now();
+          const MAX_WAIT = CONFIG.timeouts.bypassResult;
 
-          Logger.mouse("点击 [Open bypassed Link] 返回 TeoHeberg 进行验证");
-          await openLink.click();
+          while (Date.now() - startTime < MAX_WAIT) {
+            // 1. 成功判定：如果跳转回 TeoHeberg
+            if (page.url().includes("teoheberg.fr")) {
+              Logger.success("探测到已自动重定向回目标页");
+              break;
+            }
 
-          // 最终回跳校验 (必须回到 Teoheberg 管理页面)
-          try {
-            await page.waitForURL(u => u.hostname.includes("teoheberg.fr"), { timeout: 30000 });
+            // 2. 成功判定：如果按钮已可见
+            if (await openLink.isVisible()) {
+              Logger.mouse("手动点击 [Open Link] 完成任务");
+              await openLink.click({ force: true }).catch(() => { });
+              await page.waitForURL(u => u.hostname.includes("teoheberg.fr"), { timeout: 15000 }).catch(() => {});
+              if (page.url().includes("teoheberg.fr")) break;
+            }
+
+            // 3. 动态监控并自动破解验证码 (支持无限次重挑战)
+            const captchaContainer = page.locator('#cf-turnstile').first();
+            const captchaIframe = page.locator('iframe[src*="challenges.cloudflare.com"]').first();
+            
+            const isCaptchaVisible = (await captchaContainer.isVisible().catch(() => false)) || 
+                                    (await captchaIframe.isVisible().catch(() => false));
+
+            if (isCaptchaVisible) {
+              Logger.key("探测到验证码挑战，正在执行自动破解...");
+              const ok = await CaptchaSolver.solveTurnstile(page);
+              if (ok) {
+                Logger.success("本轮挑战已通过，等待页面刷新结果...");
+                await Utils.sleep(3000); 
+              }
+            }
+
+            await Utils.sleep(2000);
+          }
+
+          // 最终校验
+          if (page.url().includes("teoheberg.fr")) {
             Logger.success(`第 ${i} 轮任务执行成功，已确认返回管理端`);
             this.stats.earnCount++;
             const curParsed = parseFloat(await this.fetchCoins(page));
             const curCoins = isNaN(curParsed) ? startCoins : curParsed;
             const delta = Math.max(0, curCoins - startCoins);
             this.stats.earnStatus = `成功 +${delta.toFixed(2)}`;
-          } catch (e) {
-            await Utils.saveDebug(page, `earn_retry_${i}_return_fail`);
-            throw new Error("未能成功返回 Teoheberg 目标网页，本轮金币可能无效");
+          } else {
+            throw new Error("结果产出超时或未能成功返回 Teoheberg");
           }
 
           await Utils.sleep(3000);
