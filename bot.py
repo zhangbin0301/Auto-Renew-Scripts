@@ -20,7 +20,7 @@ except ImportError:
 CONFIG = {
     "auth": {
         "cookie_name": "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d",
-        "cookie_value": os.getenv("TEOHEBERG_REMEMBER_WEB_COOKIE", "eyJpdiI6IkxWdmlqT2FpVnpJMXE4Nys0Q3QxU1E9PSIsInZhbHVlIjoid2w3VWgrNUFvWnRtYkxITHBqYXlHM2kwdVdJSWJVWExydmNJRndpWXdpVnJVc2RBZ0pQem1LdVFiS1VpTWsrM0RnOGRxUXFvQlllYXJCRExPRkVoZXZXRTQxbC9YV0FUVTh6NjJiUFkrbnJHSTNpMEhVcmRvZTl2YlZPYkY2d1V3SERaTFIvL1JBZHR2dzVzSnM3MEprSEIwSWFqSEJhalR3MlNVZEx4Zy9ZeDlscHcrOXlOc2RObHdGNGVMd1pvNUF4a1hvWnhOcU91eFRPS3lhSVdBbUZnNDNFWVU5eUsxVjdPRFBpTllLYz0iLCJtYWMiOiIxODRhNjVmMjg4NmJjNTI2MGE2ZmJkMWQxN2M3NTYxNDAyM2Q1ODgzYjZjNGVhOTllYTg4NDA0NWJjNGRlOTI3IiwidGFnIjoiIn0%3D"),
+        "cookie_value": os.getenv("TEOHEBERG_REMEMBER_WEB_COOKIE", "eyJpdiI6InFpL1UrdFVrOE1HRkdjdHlIUXQ1WGc9PSIsInZhbHVlIjoiVjA5ZnpFTjRDbndxcGpaTTlqTXhZbWpza2tqR2RMakREbTJNMmw2WEh2YWFjRVgyRWhaUnZWMXJ2K3ozQmkxSmZTRjZRTUxIWmszSWxxM294RUQ2Qm9tRXF6c29DekVVTjc1UTdoMGpJN2Y0MXF5eFh3UTZ1NEE1c3YraU1HNkhhQTR3aFhRQUg1cURTMjA4L3VTUnlxeHdrU2I2OFZvMVZTbFdyd1pqOEs3eVBLVkhKaXZuZXZTdDNYYkVOV1Nhcmdad3hIVjRFQSs2NGdIRFZ6WTM3OFJ4ZmErbHFJdHdadjhZRTI5bE9aaz0iLCJtYWMiOiI5NmM5MjUwODBiNjdkMGY0ZDkxY2JlOWRjYWRjMjhmNzM2NzM3NTdmMmY3ODRjZDZlOTJlMDM4OWM4MDM4MDZiIiwidGFnIjoiIn0%3D"),
     },
     "urls": {
         "login": "https://manager.teoheberg.fr/login",
@@ -350,22 +350,34 @@ class TeoBot:
         }
 
     def fetch_coins(self, page) -> str:
+        if "/login" in page.url:
+            return "未登录 (Cookie 失效)"
         try:
+            # 缩短探测时间，如果在登录页，这些元素会很快返回不可见
             el = page.locator("h6:has-text('Crédits') + span").first
-            if el.is_visible(): return el.inner_text().strip()
-            drop_text = page.locator("#userDropdown").inner_text()
-            match = re.search(r"\d+(\.\d+)?", drop_text)
-            return match.group(0) if match else "未知"
+            if el.is_visible(timeout=3000): 
+                return el.inner_text().strip()
+            
+            drop = page.locator("#userDropdown").first
+            if drop.is_visible(timeout=3000):
+                drop_text = drop.inner_text()
+                match = re.search(r"\d+(\.\d+)?", drop_text)
+                return match.group(0) if match else "未知"
+            return "未知 (未见余额元素)"
         except Exception:
             return "未知"
 
     def fetch_earn_progress(self, page) -> Dict[str, int]:
+        if "/login" in page.url:
+            return {"done": 0, "total": 0, "remaining": 0}
         try:
-            text = page.locator('p:has-text("Claims Today:")').inner_text()
-            match = re.search(r"(\d+)\s*/\s*(\d+)", text)
-            if match:
-                done, total = int(match.group(1)), int(match.group(2))
-                return {"done": done, "total": total, "remaining": max(0, total - done)}
+            loc = page.locator('p:has-text("Claims Today:")').first
+            if loc.is_visible(timeout=5000):
+                text = loc.inner_text()
+                match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+                if match:
+                    done, total = int(match.group(1)), int(match.group(2))
+                    return {"done": done, "total": total, "remaining": max(0, total - done)}
         except Exception:
             pass
         return {"done": 0, "total": 3, "remaining": 1}
@@ -392,6 +404,13 @@ class TeoBot:
                 Logger.step("导航至领币中心")
                 page.goto(CONFIG["urls"]["earn"], wait_until="networkidle")
                 Logger.info(f"当前页面: {page.url}")
+                
+                if "/login" in page.url:
+                    Logger.error("🔴检测到已被重定向至登录页！请检查并更新 Secret: TEOHEBERG_REMEMBER_WEB_COOKIE")
+                    self.stats["earn_status"] = "🔴 Cookie 已失效"
+                    Utils.save_debug(page, "auth_failed_earn")
+                    break
+
                 Utils.save_debug(page, "earn_page_loaded")
                 CaptchaSolver.clean_ui(page)
                 
@@ -487,11 +506,20 @@ class TeoBot:
         try:
             page.goto(CONFIG["urls"]["home"])
             Logger.info(f"主页状态: {page.url}")
+            
+            if "/login" in page.url:
+                Logger.error("🔴 主页跳转失败：Session 已过期")
+                self.stats["renew_status"] = "🔴 认证失败"
+                Utils.save_debug(page, "auth_failed_renew")
+                return
+
             self.stats["initial_coins"] = self.fetch_coins(page)
             Utils.save_debug(page, "home_page")
             
             page.goto(CONFIG["urls"]["servers"])
             Logger.info(f"服务器页面: {page.url}")
+            if "/login" in page.url: return
+            
             Utils.save_debug(page, "servers_page")
             rem_block = page.locator("text=Renewal Required In").first
             if rem_block.is_visible():
