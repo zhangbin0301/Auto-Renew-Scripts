@@ -39,11 +39,13 @@ jobs:
       - name: 🔍 检查 WARP 开关
         id: check_warp
         run: |
-          if [ "${{ secrets.ENABLE_WARP_SECRET }}" == "true" ]; then
+          if [ "$ENABLED" == "true" ]; then
             echo "enabled=true" >> $GITHUB_OUTPUT
           else
             echo "enabled=false" >> $GITHUB_OUTPUT
           fi
+        env:
+          ENABLED: ${{ secrets.ENABLE_WARP_SECRET }}
 
       - name: 🌐 运行 WARP (可选)
         if: steps.check_warp.outputs.enabled == 'true'

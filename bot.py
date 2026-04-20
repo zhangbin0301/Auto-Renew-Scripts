@@ -116,11 +116,17 @@ class Utils:
         Logger.info(f"尝试旋转 IP (当前: {old_ip})...")
         try:
             subprocess.run(["warp-cli", "disconnect"], capture_output=True)
+<<<<<<< HEAD
             Utils.sleep(3000)
             subprocess.run(["warp-cli", "set-mode", "proxy"], capture_output=True) # 切换模式强制刷新
             subprocess.run(["warp-cli", "set-mode", "warp"], capture_output=True)
             subprocess.run(["warp-cli", "connect"], capture_output=True)
             Utils.sleep(15000)
+=======
+            Utils.sleep(2000)
+            subprocess.run(["warp-cli", "connect"], capture_output=True)
+            Utils.sleep(10000)
+>>>>>>> 4cea73ab1a51723e02e28d1e3c41e147240d5eca
             new_ip = Utils.get_current_ip()
             Logger.success(f"IP 旋转结果: {old_ip} -> {new_ip}")
         except Exception as e:
@@ -268,6 +274,7 @@ class CaptchaSolver:
                 bframe.click("#recaptcha-audio-button")
                 Utils.sleep(3000)
 
+<<<<<<< HEAD
                 if bframe.locator(".rc-doscaptcha-body-text").is_visible() or bframe.locator("text=Try again later").is_visible():
                     Logger.error("IP 已被音频封禁")
                     # 尝试点击刷新以获取新挑战
@@ -275,6 +282,10 @@ class CaptchaSolver:
                         bframe.click("#recaptcha-reload-button")
                         Utils.sleep(2000)
                     except Exception: pass
+=======
+                if bframe.locator(".rc-doscaptcha-body-text").is_visible():
+                    Logger.error("IP 已被音频封禁")
+>>>>>>> 4cea73ab1a51723e02e28d1e3c41e147240d5eca
                     return False
 
                 audio_url = bframe.locator("#audio-source").get_attribute("src")
@@ -380,8 +391,13 @@ class TeoBot:
                 if not CaptchaSolver.solve_recaptcha(page):
                     Logger.warn("验证码破解可能未成功，尝试直接提交")
 
+<<<<<<< HEAD
             # 4. 提交 (使用 force=True 避免被验证码浮窗遮挡拦截)
             page.click('button[type="submit"]', force=True)
+=======
+            # 4. 提交
+            page.click('button[type="submit"]')
+>>>>>>> 4cea73ab1a51723e02e28d1e3c41e147240d5eca
             
             # 5. 等待进入后台
             try:
