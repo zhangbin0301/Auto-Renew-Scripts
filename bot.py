@@ -19,8 +19,8 @@ except ImportError:
 # ============================================================================
 CONFIG = {
     "auth": {
-        "cookie_name": "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d",
-        "cookie_value": os.getenv("TEOHEBERG_REMEMBER_WEB_COOKIE", "eyJpdiI6IjcwQnFMRmhqY1hER0N0N25RQm9YOUE9PSIsInZhbHVlIjoiVUN5NndxU0kvaUVPaHB2dWFLb05jQktKb3BxTStUQm1MQUQwRS9CMDdKYW8xNXRhenJTZFVocEFmKzJGYjh1cTd0dm1GUGRKem1MMWhrbzZiVmViN0lHQnIyeEVmc21EbnVQQldvdlFvMm1DNjV1YlAzeVBpOURPU2NHZlRDOW5kQnA1bDhQVzZQcG5ZU1NRMlpwaCtuWmpVTnJ5ZitJVjY2cExhd0IvQ1FqUnB4QUtOVTZGUmp3ZjZzYXlESTNQb0lJWmpjeURmMDVCN3lNY0oxaGY1MjlBMG5sRzdRN3VUaWs2SlVwRytSMD0iLCJtYWMiOiIyZTE4ZmRkNjc1NTE4MDhkNjk0NzBjYzk4NmUwOTIzMDAwNjc4MTdjNDgyZjQ0M2ZlYjUxNGZlNWUzMmY1N2UwIiwidGFnIjoiIn0%3D"),
+        "email": "xiaowen880726@gmail.com",      # 请在这里填入您的邮箱
+        "password": "584yyscjZB!~",   # 请在这里填入您的密码
     },
     "urls": {
         "login": "https://manager.teoheberg.fr/login",
@@ -36,7 +36,7 @@ CONFIG = {
     "timeouts": {
         "navigation": 30000,
         "turnstile": 15000,
-        "bypass_result": 60000, # 毫秒
+        "bypass_result": 60000, 
         "get_link": 15000,
     },
     "allowed_domains": [
@@ -50,7 +50,7 @@ CONFIG = {
         "bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
         "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
     },
-    "use_warp": True # 如果需要开启 WARP，请将其改为 True
+    "use_warp": os.getenv("ENABLE_WARP", "false").lower() == "true"
 }
 
 # ============================================================================
@@ -173,7 +173,7 @@ class CaptchaSolver:
             ]
             for s in selectors:
                 loc = page.locator(s).first
-                if loc.is_visible():
+                if loc.is_visible(timeout=2000):
                     loc.click(timeout=2000)
                     Utils.sleep(500)
             
@@ -249,6 +249,10 @@ class CaptchaSolver:
     def solve_recaptcha(page) -> bool:
         Logger.key("开始 reCAPTCHA 音频挑战...")
         try:
+            iframe_loc = page.locator("iframe[src*='anchor']").first
+            if not iframe_loc.is_visible(timeout=5000):
+                return True # 可能不需要
+            
             anchor = page.wait_for_selector("iframe[src*='anchor']", timeout=10000)
             anchor.content_frame().click("#recaptcha-anchor")
             Utils.sleep(3000)
@@ -287,7 +291,7 @@ class CaptchaSolver:
                         bframe.click("#recaptcha-verify-button")
                         Utils.sleep(5000)
 
-                        if page.evaluate("() => document.querySelector('textarea[name=\"g-recaptcha-response\"]').value.length > 50"):
+                        if page.evaluate("() => { const ta = document.querySelector('textarea[name=\"g-recaptcha-response\"]'); return ta && ta.value.length > 50; }"):
                             Logger.success("reCAPTCHA 挑战成功!")
                             return True
                     except Exception as e:
@@ -349,11 +353,45 @@ class TeoBot:
             "remaining_time": "未知", "claim_progress": "0 / 3"
         }
 
+    def login(self) -> bool:
+        Logger.step("执行账号登录")
+        page = self.context.new_page()
+        try:
+            page.goto(CONFIG["urls"]["login"], wait_until="networkidle")
+            Logger.info(f"当前页面: {page.url}")
+            Utils.save_debug(page, "login_page")
+
+            # 1. 尝试过盾
+            CaptchaSolver.solve_turnstile(page)
+
+            # 2. 填写表单
+            page.fill('input[name="email"]', CONFIG["auth"]["email"])
+            page.fill('input[name="password"]', CONFIG["auth"]["password"])
+            
+            # 3. 处理 reCAPTCHA (如果有)
+            if page.locator("iframe[src*='recaptcha']").first.is_visible(timeout=3000):
+                if not CaptchaSolver.solve_recaptcha(page):
+                    Logger.warn("验证码破解可能未成功，尝试直接提交")
+
+            # 4. 提交
+            page.click('button[type="submit"]')
+            
+            # 5. 等待进入后台
+            try:
+                page.wait_for_selector("#userDropdown", timeout=15000)
+                Logger.success("🎉 登录成功!")
+                return True
+            except Exception:
+                Logger.error("🔴 登录失败: 未能进入管理后台")
+                Utils.save_debug(page, "login_failed")
+                return False
+        finally:
+            page.close()
+
     def fetch_coins(self, page) -> str:
         if "/login" in page.url:
-            return "未登录 (Cookie 失效)"
+            return "未登录"
         try:
-            # 缩短探测时间，如果在登录页，这些元素会很快返回不可见
             el = page.locator("h6:has-text('Crédits') + span").first
             if el.is_visible(timeout=3000): 
                 return el.inner_text().strip()
@@ -363,7 +401,7 @@ class TeoBot:
                 drop_text = drop.inner_text()
                 match = re.search(r"\d+(\.\d+)?", drop_text)
                 return match.group(0) if match else "未知"
-            return "未知 (未见余额元素)"
+            return "未知"
         except Exception:
             return "未知"
 
@@ -403,12 +441,9 @@ class TeoBot:
             for i in range(1, CONFIG["limits"]["earn_attempts"] + 1):
                 Logger.step("导航至领币中心")
                 page.goto(CONFIG["urls"]["earn"], wait_until="networkidle")
-                Logger.info(f"当前页面: {page.url}")
                 
                 if "/login" in page.url:
-                    Logger.error("🔴检测到已被重定向至登录页！请检查并更新 Secret: TEOHEBERG_REMEMBER_WEB_COOKIE")
-                    self.stats["earn_status"] = "🔴 Cookie 已失效"
-                    Utils.save_debug(page, "auth_failed_earn")
+                    Logger.error("🔴 Session 失效，停止任务")
                     break
 
                 Utils.save_debug(page, "earn_page_loaded")
@@ -418,7 +453,7 @@ class TeoBot:
                     try: 
                         start_coins_str = self.fetch_coins(page)
                         start_coins = float(start_coins_str)
-                        self.stats["initial_coins"] = start_coins_str # 同步到报表
+                        self.stats["initial_coins"] = start_coins_str
                     except Exception: 
                         start_coins = 0.0
                     Logger.coin(f"起始余额: {start_coins}")
@@ -430,9 +465,8 @@ class TeoBot:
                     break
 
                 btn = page.locator("a:has-text('Commencer maintenant'), a[href*='/linkvertise/generate']").first
-                if not btn.is_visible():
-                    Logger.warn("找不到金币领取按钮，可能需要重新登录或页面加载异常")
-                    Utils.save_debug(page, "earn_btn_missing")
+                if not btn.is_visible(timeout=5000):
+                    Logger.warn("找不到金币领取按钮")
                     break
 
                 try:
@@ -505,19 +539,12 @@ class TeoBot:
         page = self.context.new_page()
         try:
             page.goto(CONFIG["urls"]["home"])
-            Logger.info(f"主页状态: {page.url}")
+            if "/login" in page.url: return
             
-            if "/login" in page.url:
-                Logger.error("🔴 主页跳转失败：Session 已过期")
-                self.stats["renew_status"] = "🔴 认证失败"
-                Utils.save_debug(page, "auth_failed_renew")
-                return
-
             self.stats["initial_coins"] = self.fetch_coins(page)
             Utils.save_debug(page, "home_page")
             
             page.goto(CONFIG["urls"]["servers"])
-            Logger.info(f"服务器页面: {page.url}")
             if "/login" in page.url: return
             
             Utils.save_debug(page, "servers_page")
@@ -549,17 +576,9 @@ class TeoBot:
                         renew_btn.click()
                         
                         captcha = page.locator("iframe[src*='recaptcha']").first
-                        has_captcha = False
-                        try:
-                            # 探测验证码是否出现
-                            captcha.wait_for(state="visible", timeout=5000)
-                            has_captcha = True
-                        except Exception:
-                            Logger.info("未发现验证码挑战，准备直接提交流程")
-
-                        if has_captcha:
+                        if captcha.is_visible(timeout=5000):
                             if not CaptchaSolver.solve_recaptcha(page):
-                                raise Exception("reCAPTCHA 破解失败，停止续期以防异常操作")
+                                raise Exception("破解失败")
                         
                         page.locator("#renewal-form button[type='submit']").click()
                         Utils.sleep(8000)
@@ -600,26 +619,17 @@ def main():
     
     with Camoufox(headless=True) as browser:
         context = browser.new_context()
-        
-        c_name = CONFIG["auth"]["cookie_name"]
-        c_val = CONFIG["auth"]["cookie_value"]
-        
-        # 调试输出（脱敏）
-        Logger.info(f"正在注入 Cookie: {c_name[:15]}... | 值预览: {c_val[:10]}...")
-
-        context.add_cookies([{
-            "name": c_name,
-            "value": c_val,
-            "domain": "manager.teoheberg.fr",
-            "path": "/",
-            "secure": True,
-            "sameSite": "Lax"
-        }])
-        
         bot = TeoBot(context)
-        bot.earn()
-        bot.renew()
-        bot.report()
+        
+        if bot.login():
+            bot.earn()
+            bot.renew()
+            bot.report()
+        else:
+            Logger.error("由于登录失败，无法执行后续任务")
+            # 发送失败报告
+            Utils.send_telegram("❌ Teoheberg 登录失败，请检查账号密码或验证码识别状态。")
+            
     Logger.success("任务结束")
 
 if __name__ == "__main__":
