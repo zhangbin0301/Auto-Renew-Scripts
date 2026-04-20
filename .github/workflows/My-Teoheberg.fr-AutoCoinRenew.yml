@@ -1,0 +1,87 @@
+name: My-Teoheberg.fr-AutoCoinRenew
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 检出代码仓库
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/My-Teoheberg.fr-AutoCoinRenew
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
+
+      - name: 🐍 设置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 📦 安装依赖
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m camoufox fetch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 检查 WARP 开关
+        id: check_warp
+        run: |
+          if [ "${{ secrets.ENABLE_WARP_SECRET }}" == "true" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🌐 运行 WARP (可选)
+        if: steps.check_warp.outputs.enabled == 'true'
+        uses: fscarmen/warp-on-actions@v1.3
+        with:
+          stack: dual
+          mode: client
+
+      - name: 🚀 运行主脚本
+        env:
+          TEOHEBERG_REMEMBER_WEB_COOKIE: ${{ secrets.TEOHEBERG_REMEMBER_WEB_COOKIE }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ENABLE_WARP: ${{ steps.check_warp.outputs.enabled }}
+        run: |
+          mkdir -p screenshots
+          python bot.py
+
+      - name: 📸 上传调试截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          retention-days: 3
+
+      - name: 📝 生成运行摘要
+        if: always()
+        run: |
+          if [ -f report.md ]; then
+            cat report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 🧹 清理历史记录
+        if: always()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 3

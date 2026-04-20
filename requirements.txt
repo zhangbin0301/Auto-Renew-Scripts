@@ -1,0 +1,4 @@
+camoufox[geoip]
+playwright
+SpeechRecognition
+requests
