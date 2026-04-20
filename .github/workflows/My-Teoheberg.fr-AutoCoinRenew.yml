@@ -20,7 +20,7 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/My-Teoheberg.fr-AutoCoinRenew
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
-          fetch-depth: 0        
+          fetch-depth: 0            
 
       - name: 🐍 设置 Python 3.12
         uses: actions/setup-python@v5
