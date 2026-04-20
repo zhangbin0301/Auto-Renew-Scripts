@@ -113,24 +113,33 @@ class Utils:
     def rotate_ip():
         if not CONFIG["use_warp"]: return
         old_ip = Utils.get_current_ip()
-        Logger.info(f"尝试旋转 IP (当前: {old_ip})...")
+        Logger.info(f"🚀 启动深度 IP 旋转 (当前: {old_ip})...")
         try:
+            # 1. 断开连接并强制切换模式来刷新节点
             subprocess.run(["warp-cli", "disconnect"], capture_output=True)
-<<<<<<< HEAD
-            Utils.sleep(3000)
-            subprocess.run(["warp-cli", "set-mode", "proxy"], capture_output=True) # 切换模式强制刷新
-            subprocess.run(["warp-cli", "set-mode", "warp"], capture_output=True)
-            subprocess.run(["warp-cli", "connect"], capture_output=True)
-            Utils.sleep(15000)
-=======
             Utils.sleep(2000)
-            subprocess.run(["warp-cli", "connect"], capture_output=True)
-            Utils.sleep(10000)
->>>>>>> 4cea73ab1a51723e02e28d1e3c41e147240d5eca
+            subprocess.run(["warp-cli", "set-mode", "proxy"], capture_output=True)
+            subprocess.run(["warp-cli", "set-mode", "warp"], capture_output=True)
+            
+            # 2. 重新连接
+            Logger.debug("正在重新建立 WARP 隧道...")
+            res = subprocess.run(["warp-cli", "connect"], capture_output=True, text=True)
+            if res.stderr: Logger.debug(f"WARP 反馈: {res.stderr.strip()}")
+            
+            # 3. 等待网络回稳
+            Utils.sleep(15000)
             new_ip = Utils.get_current_ip()
-            Logger.success(f"IP 旋转结果: {old_ip} -> {new_ip}")
+            
+            if old_ip == new_ip and new_ip != "未知":
+                Logger.warn("IP 未能通过常规方式刷新，尝试强力重置...")
+                subprocess.run(["warp-cli", "disable-always-on"], capture_output=True)
+                subprocess.run(["warp-cli", "enable-always-on"], capture_output=True)
+                Utils.sleep(10000)
+                new_ip = Utils.get_current_ip()
+
+            Logger.success(f"IP 旋转完成: {old_ip} -> {new_ip}")
         except Exception as e:
-            Logger.warn(f"IP 旋转失败: {e}")
+            Logger.warn(f"IP 旋转过程出错: {e}")
 
     @staticmethod
     def send_telegram(text: str):

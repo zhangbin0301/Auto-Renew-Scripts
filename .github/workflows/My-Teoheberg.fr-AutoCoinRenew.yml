@@ -17,9 +17,6 @@ jobs:
     steps:
       - name: 📥 检出代码仓库
         uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/My-Teoheberg.fr-AutoCoinRenew
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
 
       - name: 🐍 设置 Python 3.12
         uses: actions/setup-python@v5
@@ -27,7 +24,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: 📦 安装依赖
+      - name: 📦 安装依赖 (含 ffmpeg)
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install --upgrade pip
@@ -36,30 +33,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🔍 检查 WARP 开关
-        id: check_warp
-        run: |
-          if [ "$ENABLED" == "true" ]; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
-          else
-            echo "enabled=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          ENABLED: ${{ secrets.ENABLE_WARP_SECRET }}
-
-      - name: 🌐 运行 WARP (可选)
-        if: steps.check_warp.outputs.enabled == 'true'
+      - name: 🌐 启动 Cloudflare WARP
+        # 只要 Secret 为 true 就启动。如果没填，默认为开启（方便测试）
+        if: github.event_name == 'workflow_dispatch' || secrets.ENABLE_WARP_SECRET != 'false'
         uses: fscarmen/warp-on-actions@v1.3
         with:
           stack: dual
-          mode: client
 
-      - name: 🚀 运行主脚本
+      - name: 🚀 运行机器人
         env:
-          TEOHEBERG_REMEMBER_WEB_COOKIE: ${{ secrets.TEOHEBERG_REMEMBER_WEB_COOKIE }}
+          TEOHEBERG_EMAIL: ${{ secrets.TEOHEBERG_EMAIL }}
+          TEOHEBERG_PASSWORD: ${{ secrets.TEOHEBERG_PASSWORD }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          ENABLE_WARP: ${{ steps.check_warp.outputs.enabled }}
+          # 只要上面的 WARP 步骤运行了，我们就告诉脚本尝试旋转
+          ENABLE_WARP: 'true'
         run: |
           mkdir -p screenshots
           python bot.py
