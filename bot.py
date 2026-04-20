@@ -600,11 +600,20 @@ def main():
     
     with Camoufox(headless=True) as browser:
         context = browser.new_context()
+        
+        c_name = CONFIG["auth"]["cookie_name"]
+        c_val = CONFIG["auth"]["cookie_value"]
+        
+        # 调试输出（脱敏）
+        Logger.info(f"正在注入 Cookie: {c_name[:15]}... | 值预览: {c_val[:10]}...")
+
         context.add_cookies([{
-            "name": CONFIG["auth"]["cookie_name"],
-            "value": CONFIG["auth"]["cookie_value"],
+            "name": c_name,
+            "value": c_val,
             "domain": "manager.teoheberg.fr",
-            "path": "/"
+            "path": "/",
+            "secure": True,
+            "sameSite": "Lax"
         }])
         
         bot = TeoBot(context)
