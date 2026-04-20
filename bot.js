@@ -2,7 +2,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execSync, execFileSync } = require("child_process");
-const { chromium } = require("playwright");
+const { chromium } = require("playwright-extra");
+const stealthPlugin = require("puppeteer-extra-plugin-stealth")();
+chromium.use(stealthPlugin);
 const axios = require("axios");
 
 const USE_WARP_CONFIG = true; // [控制台开关] true: 开启 WARP / false: 关闭
@@ -269,65 +271,101 @@ class BrowserManager {
  * ============================================================================
  */
 class CaptchaSolver {
-  /** 处理 Cloudflare Turnstile (核心坐标点击法) */
+  /** 处理 Cloudflare Turnstile
+   *  策略: 定位 iframe -> 拟人化点击 -> 25s 轮询 + 4/8/12s 补点击 -> 双判定通过
+   *  @returns {Promise<boolean>} true = 已通过 / false = 未通过
+   */
   static async solveTurnstile(page) {
-    Logger.info("正在执行验证码扫描序列 (全链路扫描模式)...");
+    Logger.info("正在执行 Turnstile 突破序列 (轮询+补点击+双判定)...");
 
     try {
-      // 1. 升级版选择器：直接瞄准主 DOM 中的外部容器，无视 closed shadow root
-      const standardSelector = "div#cf-turnstile, .cf-turnstile, iframe[src*='challenges.cloudflare'], iframe[src*='hcaptcha']";
-      await page.waitForSelector(standardSelector, { state: "attached", timeout: 10000 }).catch(() => null);
-      await Utils.sleep(2000);
+      // 1. 等 CF iframe 出现 (Turnstile 主渠道)
+      const cfSelector = 'iframe[src*="challenges.cloudflare.com"]';
+      await page.waitForSelector(cfSelector, { state: "attached", timeout: 15000 }).catch(() => null);
+      await Utils.sleep(1500);
 
-      let targets = await page.$$(standardSelector);
+      const cfFrames = page.frames().filter(f => (f.url() || "").includes("challenges.cloudflare.com"));
 
-      // 添加诊断打印
-      if (targets.length === 0) {
-        Logger.debug("标准扫描未击中，开始执行全页 iframe X光透视...");
-        const allIframes = await page.$$("iframe");
-        for (const [idx, frame] of allIframes.entries()) {
-          const box = await frame.boundingBox().catch(() => null);
-          const src = await frame.getAttribute("src").catch(() => "unknown") || "";
-          Logger.debug(`透视分析 Iframe[${idx}]: size=${box ? Math.round(box.width) + 'x' + Math.round(box.height) : 'null'}, src=${src.slice(0, 45)}`);
-          if (box && box.width > 280 && box.height > 60) {
-            targets.push(frame); // 只要够大就认为是验证码
-          }
-        }
-      }
-
-      if (targets.length === 0) {
-        Logger.debug("🔍 全链路透视未发现明确验证组件");
+      // 2. 完全找不到 iframe —— 保留原 bypass.city 盲狙作为最后保底
+      if (cfFrames.length === 0) {
+        Logger.debug("未定位到 CF 验证 frame，检查盲狙保底");
         if (page.url().includes("bypass.city")) {
-          Logger.shield("启动 bypass.city 盲狙策略 (估算上中位置 ~33% 高度)");
           const vp = page.viewportSize();
           if (vp) {
-            // 当前布局：checkbox 约在视口 y=33%、x=中心左偏 ~135
+            Logger.shield("启动 bypass.city 盲狙策略 (兜底)");
             await page.mouse.click(vp.width / 2 - 135, vp.height * 0.33);
             await Utils.sleep(4000);
-            return Logger.success("盲狙策略执行完毕");
           }
         }
-        return;
+        return false;
       }
 
-      Logger.step("解析坐标并注入物理点击流");
-      for (const target of targets) {
-        await target.scrollIntoViewIfNeeded().catch(() => { });
-        let box = await target.boundingBox();
-        if (!box) continue;
+      // 3. 对每个 CF frame 执行拟人化点击 + 轮询判定
+      const cfInput = page.locator('input[name="cf-turnstile-response"]').first();
+      const RECLICK_TIMES = new Set([4, 8, 12]);
 
-        // 直接信任 iframe 的真实 boundingBox（复选框靠左 ~40px，垂直居中）
-        const targetX = box.x + 40;
-        const targetY = box.y + box.height / 2;
+      for (const frame of cfFrames) {
+        try {
+          Logger.step("定位 CF 组件外框坐标");
+          const frameEl = await frame.frameElement();
+          await frameEl.scrollIntoViewIfNeeded().catch(() => { });
+          await Utils.sleep(600);
 
-        Logger.mouse(`执行物理点击辅助 (坐标: ${Math.round(targetX)}, ${Math.round(targetY)}, box=${Math.round(box.width)}x${Math.round(box.height)}@${Math.round(box.x)},${Math.round(box.y)})`);
-        await page.mouse.click(targetX, targetY);
-        await Utils.sleep(4000);
+          let box = await frameEl.boundingBox();
+          if (!box) { Logger.debug("boundingBox 为空，跳过此 frame"); continue; }
+
+          // 复选框位置: iframe 左侧 30px, 垂直居中, 带抖动
+          const calcPos = (b) => ({
+            x: b.x + 30 + Utils.rand(-4, 4),
+            y: b.y + b.height / 2 + Utils.rand(-3, 3)
+          });
+          const { x: tx, y: ty } = calcPos(box);
+
+          // 拟人化: 先从随机位置滑向目标, 再点击
+          await page.mouse.move(Utils.rand(100, 500), Utils.rand(100, 400), { steps: 10 });
+          await Utils.sleep(Utils.rand(150, 400));
+          await page.mouse.move(tx, ty, { steps: 15 });
+          await Utils.sleep(Utils.rand(100, 300));
+          Logger.mouse(`首次点击 (${Math.round(tx)}, ${Math.round(ty)}, box=${Math.round(box.width)}x${Math.round(box.height)})`);
+          await page.mouse.click(tx, ty);
+
+          // 25s 轮询: iframe 分离 OR token 注入 即为通过; 4/8/12s 补点击
+          for (let i = 0; i < 25; i++) {
+            if (frame.isDetached()) {
+              Logger.success("CF 组件已分离 (5s 盾/挑战通过)");
+              return true;
+            }
+
+            const token = await cfInput.getAttribute("value").catch(() => null);
+            if (token && token.length > 20) {
+              Logger.success(`Turnstile token 已注入 (${token.slice(0, 15)}..., ${token.length} chars)`);
+              return true;
+            }
+
+            if (RECLICK_TIMES.has(i)) {
+              try {
+                const nb = await frameEl.boundingBox();
+                if (nb) {
+                  const { x: rx, y: ry } = calcPos(nb);
+                  Logger.mouse(`补位点击 @${i}s (${Math.round(rx)}, ${Math.round(ry)})`);
+                  await page.mouse.click(rx, ry);
+                }
+              } catch { }
+            }
+
+            await Utils.sleep(1000);
+          }
+          Logger.warn("本 frame 25s 内未通过, 检查下一个");
+        } catch (e) {
+          Logger.debug(`frame 处理异常: ${e.message}`);
+        }
       }
 
-      Logger.success("验证码突破序列执行完毕");
+      Logger.warn("所有 CF frame 均未通过验证");
+      return false;
     } catch (e) {
-      Logger.warn("验证码识别过程遇到干扰: " + e.message);
+      Logger.warn("Turnstile 突破链路异常: " + e.message);
+      return false;
     }
   }
 
