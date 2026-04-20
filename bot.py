@@ -391,10 +391,17 @@ class TeoBot:
             for i in range(1, CONFIG["limits"]["earn_attempts"] + 1):
                 Logger.step("导航至领币中心")
                 page.goto(CONFIG["urls"]["earn"], wait_until="networkidle")
+                Logger.info(f"当前页面: {page.url}")
+                Utils.save_debug(page, "earn_page_loaded")
+                CaptchaSolver.clean_ui(page)
                 
                 if start_coins is None:
-                    try: start_coins = float(self.fetch_coins(page))
-                    except Exception: start_coins = 0.0
+                    try: 
+                        start_coins_str = self.fetch_coins(page)
+                        start_coins = float(start_coins_str)
+                        self.stats["initial_coins"] = start_coins_str # 同步到报表
+                    except Exception: 
+                        start_coins = 0.0
                     Logger.coin(f"起始余额: {start_coins}")
 
                 prog = self.fetch_earn_progress(page)
@@ -404,7 +411,10 @@ class TeoBot:
                     break
 
                 btn = page.locator("a:has-text('Commencer maintenant'), a[href*='/linkvertise/generate']").first
-                if not btn.is_visible(): break
+                if not btn.is_visible():
+                    Logger.warn("找不到金币领取按钮，可能需要重新登录或页面加载异常")
+                    Utils.save_debug(page, "earn_btn_missing")
+                    break
 
                 try:
                     Logger.info(f"第 {i} 次尝试...")
@@ -476,9 +486,13 @@ class TeoBot:
         page = self.context.new_page()
         try:
             page.goto(CONFIG["urls"]["home"])
+            Logger.info(f"主页状态: {page.url}")
             self.stats["initial_coins"] = self.fetch_coins(page)
+            Utils.save_debug(page, "home_page")
             
             page.goto(CONFIG["urls"]["servers"])
+            Logger.info(f"服务器页面: {page.url}")
+            Utils.save_debug(page, "servers_page")
             rem_block = page.locator("text=Renewal Required In").first
             if rem_block.is_visible():
                 raw_text = rem_block.locator("xpath=..").inner_text()
