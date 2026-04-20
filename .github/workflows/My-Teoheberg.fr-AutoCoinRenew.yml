@@ -22,7 +22,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
+
+      - name: 🔍 诊断工作目录内容
+        run: |
+          echo "当前工作目录内容："
+          ls -R
 
       - name: 📦 安装依赖 (含 ffmpeg)
         run: |
