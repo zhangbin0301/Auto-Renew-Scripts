@@ -3,12 +3,12 @@ name: My-Host2play.gratis-AutoRenew
 on:
   workflow_dispatch:
   schedule:
-    # 每天 UTC 0/8/16 点，间隔更均匀；GitHub Actions cron 仍可能有延迟
-    - cron: "0 0,8,16 * * *"
+    # 每天 0:00 / 8:00 / 16:00 UTC，间隔约 8 小时，接近 7.5 小时
+    - cron: "0 0,7,15,23 * * *"
 
 permissions:
-    contents: write
-    actions: write
+  contents: write
+  actions: write
 
 jobs:
   renew:
@@ -16,6 +16,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # =========================
+      # 📥 检出私库 Host2Play 脚本
+      # =========================
       - name: 📥 检出代码
         uses: actions/checkout@v4
         with:
@@ -23,67 +26,76 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: scripts
 
+      # =========================
+      # ⚡ Node.js
+      # =========================
       - name: ⚡ 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: scripts/package-lock.json
 
+      # =========================
+      # 📦 系统依赖
+      # =========================
       - name: 📦 安装系统依赖
         working-directory: scripts
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb wget unzip curl libgbm1 libnss3 libasound2 libx11-xcb1 libxcb-dri3-0 libdrm2 libgtk-3-0 libxss1 libxtst6
+          sudo apt-get install -y xvfb wget unzip curl jq p7zip-full
 
-      - name: 📡 安装 Xray
-        working-directory: scripts
-        env:
-          XRAY_VERSION: "26.2.6"
-        run: |
-          curl -L -o xray.zip \
-            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip"
-          unzip -o xray.zip xray
-          chmod +x xray
-          sudo mv xray /usr/local/bin/
-          xray version
+      # =========================
+      # 🌐 启动 Cloudflare WARP
+      # =========================
+      - name: 🌐 启动 Cloudflare WARP (强制 IPv4 模式)
+        uses: fscarmen/warp-on-actions@v1.3
+        with:
+          stack: ipv4
+          mode: client
 
+      # =========================
+      # 📦 Node 依赖 + Playwright Chromium
+      # =========================
       - name: 📦 安装 Node 依赖
         working-directory: scripts
         run: |
-          npm install
-          npx playwright install chromium
-          npx playwright install-deps chromium
+          npm init -y
+          npm install playwright
+          npx playwright install --with-deps chromium
 
-      - name: 🧩 下载并解压 Buster Chrome 扩展
+      # =========================
+      # 📦 下载 Buster 扩展
+      # =========================
+      - name: 🧩 下载 Buster 扩展
         working-directory: scripts
-        env:
-          BUSTER_VERSION: "3.1.0"
+        run: |
+          mkdir -p extensions/buster
+          wget -O extensions/buster/buster.zip \
+            https://github.com/dessant/buster/releases/download/v3.1.0/buster_captcha_solver_for_humans-3.1.0-chrome.zip
+
+      - name: 🧩 解压 Buster 扩展
+        working-directory: scripts
         run: |
           mkdir -p extensions/buster/unpacked
-          curl -L -o extensions/buster/buster.zip \
-            "https://github.com/dessant/buster/releases/download/v${BUSTER_VERSION}/buster_captcha_solver_for_humans-${BUSTER_VERSION}-chrome.zip"
           unzip -o extensions/buster/buster.zip -d extensions/buster/unpacked
-          test -f extensions/buster/unpacked/manifest.json
+          echo "📌 manifest.json:"
+          cat extensions/buster/unpacked/manifest.json
 
-      - name: 🧩 检查 Buster 扩展目录
-        working-directory: scripts
-        run: |
-          echo "== buster tree =="
-          ls -la extensions || true
-          ls -la extensions/buster || true
-          ls -la extensions/buster/unpacked || true
-          test -f extensions/buster/unpacked/manifest.json && echo "BUSTER_MANIFEST_OK" || echo "BUSTER_MANIFEST_MISSING"
-
-      - name: 🚀 执行续期脚本
+      # =========================
+      # 🚀 执行续费脚本
+      # =========================
+      - name: 🚀 执行续费提示脚本
         working-directory: scripts
         env:
+          RENEW_URL: ${{ secrets.RENEW_URL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           mkdir -p screenshots
           xvfb-run -a node renew.js
 
+      # =========================
+      # 📤 上传截图（路径修正）
+      # =========================
       - name: 📤 上传运行截图
         uses: actions/upload-artifact@v4
         if: always()
@@ -93,8 +105,8 @@ jobs:
           if-no-files-found: warn
           compression-level: 6
 
+      # 🕐 更新运行时间记录
       - name: 🕐 更新运行时间
-        if: always()
         working-directory: scripts
         run: |
           echo "Last run: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S CST')" > time.txt
@@ -102,11 +114,13 @@ jobs:
           git config user.email "actions@github.com"
           git add time.txt
           git diff --cached --quiet || git commit -m "🕐 更新运行时间"
-          git push
+          git push || true
 
+      # 🧹 清理超24小时的运行记录
       - name: 🧹 清理历史运行记录
-        if: always()
+        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          gh run list --limit 100 --json databaseId --jq '.[] | .databaseId' | tail -n +16 | xargs -I {} gh run delete {} || true
+        with:
+          repository: ${{ github.repository }}
+          older-than-seconds: 86400
