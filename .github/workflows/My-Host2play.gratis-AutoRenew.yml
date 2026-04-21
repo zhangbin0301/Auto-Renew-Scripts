@@ -89,6 +89,7 @@ jobs:
           RENEW_URL: ${{ secrets.RENEW_URL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          HEADLESS: "false"
         run: |
           mkdir -p screenshots
           xvfb-run -a node renew.js
