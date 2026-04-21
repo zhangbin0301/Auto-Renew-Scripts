@@ -1,4 +1,4 @@
-name: My-Teoheberg.fr-AutoCoinRenew
+name: My-Teoheberg.fr-Warp-AutoCoinRenew
 
 permissions:
   contents: write
@@ -18,7 +18,7 @@ jobs:
       - name: 📥 检出代码仓库
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/My-Teoheberg.fr-AutoCoinRenew
+          repository: ${{ github.repository_owner }}/My-Teoheberg.fr-Warp-AutoCoinRenew
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
           fetch-depth: 0            
 
