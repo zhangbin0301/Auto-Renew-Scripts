@@ -81,8 +81,11 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add README.md
           git commit -m "docs: 🤖 自动更新运行状态 [skip ci]" || exit 0
-          git pull --rebase origin main
-          git push
+          
+          # 自动重试 5 次，专门对付并发更新导致的 Git 冲突
+          for i in {1..5}; do
+            git pull --rebase origin main && git push origin HEAD:main && break || sleep 5
+          done
 
       - name: 🧹 清理历史记录
         if: always()
