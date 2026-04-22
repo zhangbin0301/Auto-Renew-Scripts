@@ -81,6 +81,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add README.md
           git commit -m "docs: 🤖 自动更新运行状态 [skip ci]" || exit 0
+          git pull --rebase origin main
           git push
 
       - name: 🧹 清理历史记录
