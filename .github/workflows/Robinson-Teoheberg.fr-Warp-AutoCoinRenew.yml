@@ -1,97 +1,160 @@
 name: Robinson-Teoheberg.fr-Warp-AutoCoinRenew
 
-permissions:
-  contents: write
-  actions: write
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 11 * * *'
+    - cron: "40 10 */29 * *"
 
 jobs:
   run:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
 
     steps:
-      - name: 📥 检出代码仓库
+      - uses: actions/checkout@v4
+
+      - name: Checkout private repo
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/Robinson-Teoheberg.fr-Warp-AutoCoinRenew
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}        
-          fetch-depth: 0            
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: scripts
 
-      - name: 🐍 设置 Python 3.12
-        uses: actions/setup-python@v5
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
+          node-version: 20
 
-      - name: 🔍 诊断工作目录内容
-        run: |
-          echo "当前工作目录内容："
-          ls -R
-
-      - name: 📦 安装依赖 (含 ffmpeg)
-        run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          python -m camoufox fetch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 🌐 启动 Cloudflare WARP (强制 IPv4 模式)
+      # =========================
+      # WARP（提供干净 IP）
+      # =========================
+      - name: 创建 WARP 网络
         uses: fscarmen/warp-on-actions@v1.3
         with:
-          stack: ipv4
+          stack: dual
           mode: client
 
-      - name: 🚀 运行机器人
+      # =========================
+      # 系统依赖
+      # xvfb + pulseaudio（Buster 音频需要）
+      # =========================
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            xvfb wget unzip curl jq p7zip-full \
+            pulseaudio alsa-utils ffmpeg
+
+          pulseaudio --start --exit-idle-time=-1 || true
+          sleep 1
+          pactl load-module module-null-sink \
+            sink_name=virtual_speaker \
+            sink_properties=device.description=VirtualSpeaker || true
+          pactl set-default-sink virtual_speaker || true
+          pactl load-module module-virtual-source \
+            source_name=virtual_mic \
+            master=virtual_speaker.monitor || true
+          pactl set-default-source virtual_mic || true
+          echo "🔊 虚拟音频就绪"
+
+      # =========================
+      # Node 依赖
+      # playwright  : 登录页 reCAPTCHA + Buster
+      # patchright  : bypass.city Turnstile（主方案）
+      # =========================
+      - name: 安装 Node 依赖
+        run: |
+          cd scripts
+          npm init -y
+          npm install playwright patchright
+          npx playwright install chromium
+          npx playwright install-deps chromium
+          npx patchright install chrome
+          echo "✅ playwright + patchright 安装完成"
+
+      # =========================
+      # Buster 扩展（登录页 reCAPTCHA）
+      # =========================
+      - name: 下载 Buster 扩展
+        run: |
+          mkdir -p scripts/extensions/buster
+          wget -q -O scripts/extensions/buster/buster.zip \
+            https://github.com/dessant/buster/releases/download/v3.1.0/buster_captcha_solver_for_humans-3.1.0-chrome.zip
+
+      - name: 解压 Buster 扩展
+        run: |
+          mkdir -p scripts/extensions/buster/unpacked
+          7z x -y scripts/extensions/buster/buster.zip \
+            -oscripts/extensions/buster/unpacked > /dev/null
+          ls scripts/extensions/buster/unpacked/manifest.json && \
+            echo "✅ Buster OK" || echo "❌ Buster manifest 缺失"
+
+      # =========================
+      # NopeCHA 扩展（bypass.city Turnstile 备用方案）
+      # 用途：patchright 失败时自动切换
+      # 与 Buster 各司其职：
+      #   Buster  → 登录页 reCAPTCHA（Playwright launchPersistentContext）
+      #   NopeCHA → bypass.city Turnstile（独立 Playwright 实例）
+      # =========================
+      - name: 下载 NopeCHA 扩展
+        working-directory: scripts
+        run: |
+          mkdir -p extensions/nopecha
+          wget -q -O extensions/nopecha/chromium.zip \
+            https://github.com/NopeCHALLC/nopecha-extension/releases/latest/download/chromium.zip
+          echo "✅ NopeCHA 下载完成"
+
+      - name: 解压 NopeCHA 扩展
+        working-directory: scripts
+        run: |
+          mkdir -p extensions/nopecha/unpacked
+          7z x -y extensions/nopecha/chromium.zip \
+            -oextensions/nopecha/unpacked > /dev/null
+          echo "📌 NopeCHA manifest:"
+          cat extensions/nopecha/unpacked/manifest.json | \
+            python3 -c "import json,sys; m=json.load(sys.stdin); print(f'name={m[\"name\"]} version={m[\"version\"]}')" || \
+            ls extensions/nopecha/unpacked/
+
+      # =========================
+      # 准备脚本
+      # =========================
+      - name: 准备 makecoins.js
+        run: |
+          ls scripts/makecoins.js && echo "✅ makecoins.js 就绪" || \
+            (echo "❌ 未找到 makecoins.js" && exit 1)
+
+      - name: 检查 IP
+        run: |
+          echo "🌍 IP: $(curl -s https://api.ipify.org)"
+          curl -s https://ipinfo.io | jq '{ip,city,country,org}' 2>/dev/null || true
+
+      # =========================
+      # 运行
+      # 浏览器实例说明：
+      #   [1] Playwright + Buster  → 登录 reCAPTCHA（头部浏览器）
+      #   [2] patchright           → bypass.city Turnstile（主方案）
+      #   [3] Playwright + NopeCHA → bypass.city Turnstile（备用方案）
+      # 实例 [2][3] 在独立进程中启动，与 [1] 互不干扰
+      # =========================
+      - name: 运行 makecoins.js
         env:
-          TEOHEBERG_EMAIL: ${{ secrets.TEOHEBERG_EMAIL }}
-          TEOHEBERG_PASSWORD: ${{ secrets.TEOHEBERG_PASSWORD }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          # 只要上面的 WARP 步骤运行了，我们就告诉脚本尝试旋转
-          ENABLE_WARP: 'true'
+          TEO_EMAIL:    ${{ secrets.TEO_EMAIL }}
+          TEO_PASSWORD: ${{ secrets.TEO_PASSWORD }}
+          TG_TOKEN:     ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          MAX_RETRY:    "3"
         run: |
-          mkdir -p screenshots
-          python bot.py
+          mkdir -p scripts/screenshots
+          xvfb-run --auto-servernum \
+            --server-args="-screen 0 1280x900x24 -ac" \
+            node scripts/makecoins.js
+        continue-on-error: true
 
-      - name: 📸 上传调试截图
-        if: always()
+      - name: 上传截图
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: screenshots
-          path: screenshots/
-          retention-days: 3
-
-      - name: 📝 生成运行摘要
-        if: always()
-        run: |
-          if [ -f report.md ]; then
-            cat report.md >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: 🆙 更新 README 到仓库
-        if: always()
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add README.md
-          git commit -m "docs: 🤖 自动更新运行状态 [skip ci]" || exit 0
-          
-          # 自动重试 5 次，专门对付并发更新导致的 Git 冲突
-          for i in {1..5}; do
-            git pull --rebase origin main && git push origin HEAD:main && break || sleep 5
-          done
-
-      - name: 🧹 清理历史记录
-        if: always()
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          retain_days: 0
-          keep_minimum_runs: 3
+          name: teo-screenshots-${{ github.run_id }}
+          path: scripts/screenshots/
+          if-no-files-found: warn
+          retention-days: 7
