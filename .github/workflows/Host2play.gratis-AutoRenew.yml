@@ -3,7 +3,7 @@ name: Host2play.gratis-AutoRenew
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # 示例：每 7 小时运行一次 (UTC时间)
+    - cron: '0 */7 * * *' # 示例：每 7 小时运行一次 (UTC时间)
 
 permissions:
   contents: write
