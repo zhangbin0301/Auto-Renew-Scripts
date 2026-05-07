@@ -3,7 +3,7 @@ name: Robinson-Teoheberg.fr-Warp-AutoCoinRenew
 on:
   workflow_dispatch:
   schedule:
-    - cron: "40 10 */29 * *"
+    - cron: "10 12 * * *"
 
 jobs:
   run:
